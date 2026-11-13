@@ -80,14 +80,21 @@ class Settings:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
-            return cls()
+            s = cls()
+            s._path = path
+            return s
         except (OSError, ValueError) as e:
             log.warning("Could not read settings (%s) – using defaults", e)
-            return cls()
+            s = cls()
+            s._path = path
+            return s
         known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in known})
+        s = cls(**{k: v for k, v in data.items() if k in known})
+        s._path = path
+        return s
 
-    def save(self, path: Path = SETTINGS_JSON) -> None:
+    def save(self, path: Optional[Path] = None) -> None:
+        path = path or getattr(self, "_path", None) or SETTINGS_JSON
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")

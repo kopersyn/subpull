@@ -1,4 +1,8 @@
-# SubPull
+<p align="center">
+  <img src="docs/assets/logo-128.png" width="96" alt="SubPull logo">
+</p>
+
+<h1 align="center">SubPull</h1>
 
 A small desktop tool for **manually** pulling astrophotography frames from an SFTP server
 (remote observatory, imaging PC, NAS…) into a tidy local library:
@@ -7,11 +11,29 @@ A small desktop tool for **manually** pulling astrophotography frames from an SF
 <destination>/<OBJECT>/subs/<original file name>
 ```
 
-It scans the server only when you click **Scan server**, shows every frame grouped by
-object and session, and downloads only what you select. No background sync, no schedule,
-nothing is ever written to, renamed on, or deleted from the server.
+It scans the server only when you click **Scan**, shows every frame grouped by object,
+session or frame type, and downloads only what you select and confirm. No background sync, no
+schedule, nothing is ever written to, renamed on, or deleted from the server.
+
+Built with Python and Qt (PySide6): a dark, high-DPI-aware desktop UI for Windows, macOS and Linux.
 
 ## Features
+
+**Interface**
+
+- **Library** – objects list with frame/new counts, a virtualized frame browser grouped by object,
+  session or type, colored frame-type badges, filters (type, session, new only, search),
+  tri-state checkbox selection, sortable and configurable columns, and a details panel with the
+  FITS header, local status, destination and server path of the current frame.
+- **Transfers** – overall progress, speed, remaining size, time left, per-file progress bars and
+  states (queued, downloading, verifying, done, skipped, error, cancelled); stop, cancel, retry.
+- **History** – every downloaded file (searchable) plus an activity list of scans, batches and errors.
+- **Activity log** – searchable log with severity filter.
+- **Settings** – connection (FileZilla site, server, user, auth method, test), library location,
+  scanning, transfers and data folders, each in its own section.
+- Keyboard: `F5` scan, `Ctrl+1…5` pages, `Ctrl+F` search files, `Space` toggles highlighted rows.
+
+**Core**
 
 - Reuses an existing **FileZilla Site Manager** entry (SFTP, key file or saved password) and the
   host keys FileZilla already trusts – no second credential store.
@@ -42,8 +64,8 @@ downloaded.
 
 ## Install
 
-Requires Python 3.10+ with Tk (included in the python.org installers; on Debian/Ubuntu
-`sudo apt install python3-tk`).
+Requires Python 3.10+. Dependencies (`paramiko`, `PySide6-Essentials`) are installed by pip.
+On minimal Linux systems Qt may need `libegl1 libxkbcommon0 libfontconfig1`.
 
 ```bash
 pip install git+https://github.com/kopersyn/subpull
@@ -62,9 +84,12 @@ python -m venv .venv
 
 1. Create an SFTP site in FileZilla's Site Manager (key file or saved password) and connect to it
    once so FileZilla stores the server's host key.
-2. Start SubPull and pick the site in the **Site** box (the first SFTP site is preselected).
-3. Click **Change…** next to the destination and choose your library folder.
-4. Enter the remote folder to scan and click **Scan server**.
+2. Start SubPull. The first SFTP site is preselected; switch sites from the site button in the
+   toolbar or in **Settings → Connection**.
+3. Choose your library folder from the destination button (top right) or the banner in the Library.
+4. Enter the remote folder in the toolbar and press **Scan** (`F5`).
+5. Tick frames, objects or sessions and press **Download**. Review the plan – destinations,
+   skipped files and any overwrite – and confirm.
 
 ## Settings and data
 
@@ -73,7 +98,7 @@ python -m venv .venv
 | Settings, history, log | `%LOCALAPPDATA%\SubPull` | `~/Library/Application Support/SubPull` | `~/.local/share/subpull` |
 | FileZilla sites (read-only) | `%APPDATA%\FileZilla` | `~/.config/filezilla` | `~/.config/filezilla` |
 
-`settings.json` keys: `profile_name`, `dest_root`, `source_dir`, `read_fits`,
+`ui.ini` stores window layout (columns, splitters, sidebar). `settings.json` keys: `profile_name`, `dest_root`, `source_dir`, `read_fits`,
 `parallel_transfers`, `placeholder_objects` (OBJECT values treated as "unknown").
 
 While a file downloads it is named `<file>.subpull-part`; it is renamed to the original name after
@@ -86,9 +111,9 @@ pip install -e .
 python -m unittest discover -s tests -t .
 ```
 
-The tests use a local directory as a fake server, so they need no network.
-The code is split into `connection` (all network access), `scanner`/`classify`/`fits_header`
-(recognition), `downloader` (transfers), `local_state`/`history` (local side) and `gui`.
+The tests use a local directory as a fake server, so they need no network; the Qt tests run
+headless (`QT_QPA_PLATFORM=offscreen`). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
+module layout, the GUI technology decision and packaging notes (PyInstaller).
 
 ## License
 
