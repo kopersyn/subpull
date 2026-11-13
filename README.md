@@ -47,6 +47,14 @@ Built with Python and Qt (PySide6): a dark, high-DPI-aware desktop UI for Window
 - Never overwrites a local file without an explicit confirmation; flags duplicates by name and size.
 - Download history in a local SQLite database (nothing extra is written next to your frames).
 
+## Remote access over a VPN
+
+SubPull talks plain SFTP, so it works well over a private VPN to the observatory, such as
+[WireGuard](https://www.wireguard.com/) or [Tailscale](https://tailscale.com/). Point the
+FileZilla site at the VPN address (for example the Tailscale IP or MagicDNS name) – the SFTP
+port never has to be exposed to the internet. Interrupted transfers on a flaky link resume where
+they stopped.
+
 ## Supported layouts
 
 The layout is detected per object directory, so different layouts can coexist on one server.
