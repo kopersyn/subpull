@@ -1,6 +1,7 @@
 """Qt UI integration tests. They run headless (offscreen platform) against a local fake server."""
 from __future__ import annotations
 
+import gc
 import os
 import tempfile
 import time
@@ -31,6 +32,21 @@ def app():
     if APP is None:
         APP = QApplication.instance() or QApplication([])
     return APP
+
+
+def flush_deletes() -> None:
+    """Destroy Qt objects now, in a defined order, instead of at interpreter exit
+    (late destruction during Python shutdown can crash Qt on Linux)."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+    for _ in range(3):
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        QCoreApplication.processEvents()
+    gc.collect()
+
+
+def tearDownModule():
+    if APP is not None:
+        flush_deletes()
 
 
 def write(p: Path, data: bytes) -> None:
@@ -100,6 +116,8 @@ class UITests(unittest.TestCase):
 
     def tearDown(self):
         self.ctl.shutdown()
+        self.ctl.deleteLater()
+        flush_deletes()
         config.APP_DIR = self._old_app_dir
         self._td.cleanup()
 
@@ -215,6 +233,9 @@ class UITests(unittest.TestCase):
         self.assertTrue(dlg.btn_ok.isEnabled())
         dlg.reject()
         w.close()
+        dlg.deleteLater()
+        w.deleteLater()
+        flush_deletes()
 
 
 if __name__ == "__main__":
