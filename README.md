@@ -64,6 +64,16 @@ downloaded.
 
 ## Install
 
+### Windows installer
+
+Download `SubPull-<version>-Setup.exe` from the
+[latest release](https://github.com/kopersyn/subpull/releases/latest) and run it. It installs
+for the current user only (no administrator rights) and adds a Start-menu entry; a portable zip
+is attached as well. The builds are not code-signed, so Windows SmartScreen may ask you to
+confirm (*More info → Run anyway*). Checksums are in `SHA256SUMS.txt`.
+
+### From source (Windows, macOS, Linux)
+
 Requires Python 3.10+. Dependencies (`paramiko`, `PySide6-Essentials`) are installed by pip.
 On minimal Linux systems Qt may need `libegl1 libxkbcommon0 libfontconfig1`.
 

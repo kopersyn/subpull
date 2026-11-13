@@ -82,12 +82,15 @@ of fixed pixel geometry.
 
 ## Packaging
 
-`pip install .` installs the `subpull` GUI command. For a standalone build, PyInstaller works
-with the default PySide6 hooks, e.g.:
+`pip install .` installs the `subpull` GUI command. Windows releases are built by
+`.github/workflows/release.yml` when a `v*` tag is pushed: tests, a PyInstaller one-folder build
+(`packaging/subpull.spec`), an Inno Setup per-user installer (`packaging/subpull.iss`), a portable
+zip and `SHA256SUMS.txt`, published as a GitHub release. Local build:
 
 ```bash
 pip install pyinstaller
-pyinstaller --name SubPull --windowed --collect-data subpull -p . subpull/__main__.py
+pyinstaller packaging/subpull.spec --noconfirm --distpath build/dist --workpath build/work
+iscc /DAppVersion=1.0.0 packaging/subpull.iss
 ```
 
-(Standalone builds are not part of the release process yet.)
+The app icon is generated from the logo with `python packaging/make_icon.py`.

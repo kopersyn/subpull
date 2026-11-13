@@ -3,4 +3,4 @@ try:
     from importlib.metadata import version as _version
     __version__ = _version("subpull")
 except Exception:  # running from a source tree without installation
-    __version__ = "0.2.0"
+    __version__ = "1.0.0"

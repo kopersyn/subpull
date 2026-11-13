@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "subpull"
-version = "0.2.0"
+version = "1.0.0"
 description = "Manual, safe downloader for astrophotography frames on SFTP servers, organized per object."
 readme = "README.md"
 license = "MIT"
@@ -16,7 +16,7 @@ dependencies = [
 ]
 keywords = ["astrophotography", "fits", "sftp", "downloader", "nina", "remote observatory"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: X11 Applications :: Qt",
     "Environment :: Win32 (MS Windows)",
     "Environment :: MacOS X",

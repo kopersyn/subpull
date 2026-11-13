@@ -1,0 +1,51 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install
+        run: pip install . pyinstaller
+      - name: Tests
+        run: python tests/run_ci.py
+      - name: Check tag matches package version
+        shell: bash
+        run: |
+          v=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          test "v$v" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != version $v"; exit 1; }
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+      - name: Build app (PyInstaller)
+        run: pyinstaller packaging/subpull.spec --noconfirm --distpath build/dist --workpath build/work
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc "/DAppVersion=$env:VERSION" packaging\subpull.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Portable zip
+        shell: pwsh
+        run: Compress-Archive -Path build\dist\SubPull -DestinationPath "build\installer\SubPull-$env:VERSION-windows-portable.zip"
+      - name: Checksums
+        shell: bash
+        run: cd build/installer && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/installer/* \
+            --title "SubPull $VERSION" --notes-file packaging/RELEASE_NOTES.md
