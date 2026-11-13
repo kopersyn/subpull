@@ -41,15 +41,19 @@ def write(p: Path, data: bytes) -> None:
 class FakeConnection:
     """Stands in for SFTPConnection: sessions read a local directory."""
 
-    def __init__(self, root: Path, fail: bool = False):
-        self.root, self.fail = root, fail
+    def __init__(self, root: Path, fail: bool = False, delay: float = 0.0):
+        self.root, self.fail, self.delay = root, fail, delay
         self.profile = SiteProfile("Test", "localhost", 22, "sftp", "tester", 5, None)
         self.label = "tester@localhost:22"
 
     def connect(self):
         if self.fail:
             raise ConnectionFailed("server unreachable")
-        return LocalFS(self.root)
+        fs = LocalFS(self.root)
+        if self.delay:                                  # emulate network latency per directory listing
+            listdir = fs.listdir
+            fs.listdir = lambda path: (time.sleep(self.delay), listdir(path))[1]
+        return fs
 
     def connect_with_retry(self, retries=1, cancel=None, on_retry=None):
         return self.connect()
@@ -111,8 +115,9 @@ class UITests(unittest.TestCase):
 
     # ------------------------------------------------------------------ controller
     def test_scan_runs_in_background_and_recognizes_layouts(self):
+        self.ctl.conn = FakeConnection(self.server, delay=0.05)   # scan takes ~0.5 s, timer ticks every 5 ms
         ticks = self.scan()
-        self.assertGreater(ticks, 0, "GUI event loop must keep running during a scan")
+        self.assertGreater(ticks, 10, "GUI event loop must keep running during a scan")
         names = {f.name: f for f in self.ctl.result.files}
         self.assertEqual(set(names), {"a.fit", "f.fit", "LIGHT_001.fit", "DARK_001.fit", "old.fits"})
         self.assertEqual((names["old.fits"].object_name, names["old.fits"].object_source), ("NGC 7000", "FITS"))
