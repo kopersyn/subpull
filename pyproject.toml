@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "subpull"
+version = "0.1.0"
+description = "Manual, safe downloader for astrophotography frames on SFTP servers, organized per object."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = ["paramiko>=3.2"]
+keywords = ["astrophotography", "fits", "sftp", "downloader", "nina", "remote observatory"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: MacOS X",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+
+[project.gui-scripts]
+subpull = "subpull.gui:main"
+
+[tool.setuptools.packages.find]
+include = ["subpull*"]
