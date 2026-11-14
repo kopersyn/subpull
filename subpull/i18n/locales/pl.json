@@ -353,7 +353,7 @@
         "hostkey.mismatch.title": "Niezgodny klucz hosta",
         "hostkey.mismatch.text": "Serwer używa innego klucza hosta niż zapisany w FileZilla. Połączenie zostało zablokowane. Może to oznaczać zmianę konfiguracji serwera, ale także próbę podszycia się pod serwer. Wyjaśnij przyczynę i sprawdź serwer w FileZilla, zanim połączysz się ponownie.",
         "hostkey.unknown.title": "Nieznany klucz hosta",
-        "hostkey.unknown.text": "Tego klucza hosta nie ma w FileZilla ani w pliku known_hosts. Zaufaj mu tylko wtedy, gdy masz pewność, że łączysz się z właściwym serwerem – najlepiej po porównaniu odcisku klucza z administratorem serwera. Zaufać mu na czas tej sesji? (Nic nie zostanie zapisane).",
+        "hostkey.unknown.text": "Tego klucza hosta nie ma w FileZilla ani w pliku known_hosts. Zaufaj mu tylko wtedy, gdy masz pewność, że łączysz się z właściwym serwerem – najlepiej po porównaniu odcisku klucza z administratorem serwera. Zaufać mu na czas tej sesji? (Nic nie zostanie zapisane.)",
         "hostkey.unknown.trust": "Zaufaj na czas tej sesji",
 
         "error.connection.title": "Problem z połączeniem",
