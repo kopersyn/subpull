@@ -4,10 +4,11 @@ from __future__ import annotations
 from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QProgressBar, QStackedWidget, QTableView, QWidget
 
-from ..workflow import fmt_duration, fmt_size
+from ..i18n import number, t
+from ..workflow import fmt_duration, fmt_size, fmt_speed
 from .controller import Controller
 from .models import QueueModel
-from .widgets import Card, EmptyState, QueueDelegate, StatTile, button, hbox, label, vbox
+from .widgets import Card, EmptyState, QueueDelegate, StatTile, Texts, hbox, headers_changed, label, vbox
 
 
 class QueuePage(QWidget):
@@ -17,27 +18,27 @@ class QueuePage(QWidget):
         self.ctl = ctl
         self.qs = qs
 
-        self.state_label = label("Idle", "Muted")
-        header = hbox(vbox(label("Transfers", "PageTitle"), self.state_label, spacing=2), None)
+        self.tx = tx = Texts()
+
+        self.state_label = label("", "Muted")
+        header = hbox(vbox(tx.label("nav.queue", "PageTitle"), self.state_label, spacing=2), None)
 
         # ---- summary card ------------------------------------------------------------
         self.progress = QProgressBar()
         self.progress.setRange(0, 1000)
         self.progress.setTextVisible(False)
         self.progress_text = label("", "Muted")
-        self.t_files = StatTile("Downloaded")
-        self.t_speed = StatTile("Speed")
-        self.t_left = StatTile("Remaining")
-        self.t_eta = StatTile("Time left")
-        self.t_problems = StatTile("Errors / cancelled")
+        self.t_files, self.t_speed, self.t_left, self.t_eta, self.t_problems = (StatTile() for _ in range(5))
+        for tile, key in ((self.t_files, "downloaded"), (self.t_speed, "speed"), (self.t_left, "remaining"),
+                          (self.t_eta, "eta"), (self.t_problems, "problems")):
+            tx.bind(tile.set_caption, f"queue.tile.{key}")
         tiles = hbox(self.t_files, self.t_speed, self.t_left, self.t_eta, self.t_problems, None, spacing=36)
-        self.btn_stop = button("Stop all", "stop", "Danger", "Stop every transfer; partial files are kept for resume",
-                               self.ctl.stop_all)
-        self.btn_cancel = button("Cancel selected", "x", slot=self._cancel_selected)
-        self.btn_retry = button("Retry failed", "retry", tooltip="Re-queue failed and cancelled transfers (they resume)",
-                                slot=self.ctl.retry_failed)
-        self.btn_clear = button("Clear finished", "clear", tooltip="Remove finished rows from this list (files are kept)",
-                                slot=self._clear_finished)
+        self.btn_stop = tx.button("queue.stop_all", "stop", "Danger", "queue.stop_all.tooltip", self.ctl.stop_all)
+        self.btn_cancel = tx.button("queue.cancel_selected", "x", slot=self._cancel_selected)
+        self.btn_retry = tx.button("queue.retry_failed", "retry", tooltip="queue.retry_failed.tooltip",
+                                   slot=self.ctl.retry_failed)
+        self.btn_clear = tx.button("queue.clear_finished", "clear", tooltip="queue.clear_finished.tooltip",
+                                   slot=self._clear_finished)
         summary = Card()
         summary.setLayout(vbox(hbox(self.progress_text, None, self.btn_stop, self.btn_cancel, self.btn_retry, self.btn_clear),
                                self.progress, 4, tiles, spacing=10, margins=(16, 14, 16, 14)))
@@ -61,9 +62,9 @@ class QueuePage(QWidget):
         if qs.contains("queue/header"):
             self.table.horizontalHeader().restoreState(qs.value("queue/header"))
 
-        self.empty = EmptyState("queue", "No transfers",
-                                "Select frames in the Library and press Download. Transfers start only after you "
-                                "confirm the selection.")
+        self.empty = EmptyState("queue", "", "")
+        tx.bind(self.empty.title.setText, "queue.empty.title")
+        tx.bind(self.empty.text.setText, "queue.empty.text")
         self.stack = QStackedWidget()
         self.stack.addWidget(self.empty)
         self.stack.addWidget(self.table)
@@ -73,6 +74,12 @@ class QueuePage(QWidget):
         self._timer = QTimer(self, interval=500, timeout=self.update_stats)
         ctl.jobUpdated.connect(self._on_job)
         ctl.queueIdle.connect(self.update_stats)
+        self.update_stats()
+
+    def retranslate(self) -> None:
+        self.tx.retranslate()
+        headers_changed(self.model)
+        self.table.viewport().update()
         self.update_stats()
 
     def save_state(self) -> None:
@@ -103,16 +110,19 @@ class QueuePage(QWidget):
         self.btn_retry.setEnabled(not running and (s.errors + s.cancelled) > 0)
         self.btn_clear.setEnabled(self.model.rowCount() > 0 and not running)
         if s.total_files == 0:
-            self.state_label.setText("Idle")
-            self.progress_text.setText("No active batch")
-        elif running:
-            self.state_label.setText(f"Downloading · {s.active} active · {s.queued} queued")
-            self.progress_text.setText(f"{fmt_size(s.done_bytes)} of {fmt_size(s.total_bytes)}  ·  {s.fraction * 100:.1f}%")
+            self.state_label.setText(t("queue.state.idle"))
+            self.progress_text.setText(t("queue.progress.none"))
         else:
-            self.state_label.setText("Batch finished" if not (s.errors or s.cancelled) else "Batch finished with problems")
-            self.progress_text.setText(f"{fmt_size(s.done_bytes)} of {fmt_size(s.total_bytes)}  ·  {s.fraction * 100:.1f}%")
-        self.t_files.value.setText(f"{s.done} / {s.total_files - s.skipped}" + (f"  (+{s.skipped} skipped)" if s.skipped else ""))
-        self.t_speed.value.setText(f"{fmt_size(s.speed)}/s" if running else "—")
+            if running:
+                self.state_label.setText(t("queue.state.running", active=s.active, queued=s.queued))
+            else:
+                self.state_label.setText(t("queue.state.finished_problems" if s.errors or s.cancelled
+                                           else "queue.state.finished"))
+            self.progress_text.setText(t("queue.progress.text", done=fmt_size(s.done_bytes), total=fmt_size(s.total_bytes),
+                                         percent=number(s.fraction * 100, ".1f")))
+        self.t_files.value.setText(f"{s.done} / {s.total_files - s.skipped}"
+                                   + (f"  {t('queue.tile.skipped', count=s.skipped)}" if s.skipped else ""))
+        self.t_speed.value.setText(fmt_speed(s.speed) if running else "—")
         self.t_left.value.setText(fmt_size(s.remaining_bytes) if running else "—")
         self.t_eta.value.setText(fmt_duration(s.eta_seconds) if running else "—")
         self.t_problems.value.setText(f"{s.errors} / {s.cancelled}")

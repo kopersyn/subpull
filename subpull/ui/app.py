@@ -31,7 +31,7 @@ def main(argv=None) -> int:
     app.setApplicationDisplayName(config.APP_NAME)
     app.setOrganizationName(config.APP_NAME)
 
-    from . import icons
+    from . import icons, language
     from .controller import Controller
     from .main_window import MainWindow
     from .models import LogModel
@@ -46,6 +46,7 @@ def main(argv=None) -> int:
     logging.getLogger().addHandler(QtLogHandler(bridge))
 
     ctl = Controller()
+    language.apply(ctl.settings.language)      # bundled translations; "auto" follows the system language
     win = MainWindow(ctl, log_model)
     ctl.reload_sites()
     win.show()

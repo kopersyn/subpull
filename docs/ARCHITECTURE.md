@@ -38,10 +38,19 @@ subpull/                 core – plain Python, never imports Qt
   downloader.py          transfer workers, resume, verification, overwrite rules
   workflow.py            filtering, grouping, download planning, queue statistics
 
+subpull/i18n/            localization – plain Python, no Qt
+  manager.py             t(key, **values), language selection, English fallback
+  plurals.py             plural categories per language
+  locale_file.py         reading a locale file (shared by app, validator, statistics)
+  validate.py            python -m subpull.i18n.validate
+  stats.py               python -m subpull.i18n.stats
+  locales/<code>.json    one file per language; en.json is the source
+
 subpull/ui/              Qt Widgets front end (PySide6)
   app.py                 QApplication setup, DPI policy, logging bridge, entry point
   controller.py          single bridge to the core: state, background tasks, signals
   workers.py             QThread task runner, logging → GUI bridge
+  language.py            system language, layout direction, Qt's own translations
   models.py              item models (frame tree, objects, queue, history, log)
   widgets.py             reusable widgets and painting delegates
   theme.py / icons.py    color tokens, stylesheet, vector icons
@@ -62,6 +71,36 @@ Rules:
   (`TaskThread`); download workers report through a signal, which Qt delivers to the GUI
   thread through a queued connection.
 * Item views use models, so thousands of frames are painted on demand rather than created as widgets.
+
+## Localization
+
+Every user-facing text has a stable key in `subpull/i18n/locales/en.json`; the other files in that
+folder are community translations with the same keys (contributor guide: `translations/README.md`).
+The folder is the single source of truth and is shipped as package data – nothing is fetched at
+run time.
+
+* **Lookup:** `t("actions.download")`, `t("count.files", count=5)`. Missing or broken translations
+  fall back to English, unknown keys come back as the key; `t()` never raises. A value may be an
+  object of plural forms (`one`, `few`, `many`, `other`…) selected by `count`.
+  `SUBPULL_I18N_DEBUG=1` logs every fallback.
+* **Stable identifiers stay untranslated:** enum values (`LocalStatus`, transfer states, FITS
+  status, history event kinds) are stored and compared as before and mapped to a key only for
+  display (`status_label()`, `t(f"transfer.state.{state}")`).
+* **Runtime switching:** `Controller.set_language()` saves the setting, activates the language
+  and emits `languageChanged`. `MainWindow.retranslate()` then calls `retranslate()` on the
+  sidebar, top bar and every page. Static texts are registered once with `Texts` (`widgets.py`),
+  which re-applies them to the existing widgets; models emit `headerDataChanged`; menus are
+  rebuilt; dynamic labels re-run their normal refresh. No window or page is recreated, so
+  selection, scan results and running transfers are untouched.
+* **Texts recorded with an event** – transfer messages, notes on scanned files, the activity
+  history and exception messages – are written in the language active at that moment and are not
+  translated afterwards. The log file mixes them with English diagnostic messages by design:
+  developer-facing log lines are not translated so that bug reports stay readable.
+* **Right-to-left:** `_meta.direction` of the locale file sets the application's layout direction.
+* **Qt's own texts** (text-field context menus, the non-native file dialog) come from the
+  `qtbase_<code>.qm` files that ship with Qt, when one exists for the language.
+* **Adding a language** needs no code change: a valid `<code>.json` in the folder appears in
+  Settings → Language. Completion percentages are calculated, never stored.
 
 ## Safety guarantees (unchanged)
 

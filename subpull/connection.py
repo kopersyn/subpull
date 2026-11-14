@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import BinaryIO, Callable, Optional, Protocol
 
 from . import config
+from .i18n import t
 from .filezilla import LOGON_KEYFILE, LOGON_NORMAL, SiteProfile, load_trusted_hostkeys
 
 log = logging.getLogger(__name__)
@@ -87,16 +88,16 @@ class SFTPSession:
         try:
             return fn()
         except FileNotFoundError as e:
-            raise RemotePathError(f"Not found on server: {path}") from e
+            raise RemotePathError(t("error.remote.not_found", path=path)) from e
         except PermissionError as e:
-            raise RemotePathError(f"Permission denied: {path}") from e
+            raise RemotePathError(t("error.remote.permission_denied", path=path)) from e
         except IOError as e:
             if is_network_error(e) or not self._transport.is_active():
-                raise ConnectionFailed(f"Connection lost ({path}): {e}") from e
+                raise ConnectionFailed(t("error.remote.connection_lost", path=path, error=e)) from e
             raise RemotePathError(f"{path}: {e}") from e
         except Exception as e:
             if is_network_error(e):
-                raise ConnectionFailed(f"Connection lost ({path}): {e}") from e
+                raise ConnectionFailed(t("error.remote.connection_lost", path=path, error=e)) from e
             raise
 
     def listdir(self, path: str) -> list[RemoteEntry]:
@@ -154,7 +155,7 @@ class SFTPConnection:
 
     def __init__(self, profile: SiteProfile, timeout: int = config.CONNECT_TIMEOUT):
         if profile.protocol != "sftp":
-            raise ConnectionFailed(f"Site '{profile.name}' uses {profile.protocol}; only SFTP is supported.")
+            raise ConnectionFailed(t("error.site.protocol", site=profile.name, protocol=profile.protocol))
         self.profile = profile
         self.timeout = timeout
         self._accepted_hostkeys: set[bytes] = set()   # accepted for this program session only
@@ -179,7 +180,7 @@ class SFTPConnection:
                 return self._pkey
             kf = self.profile.keyfile
             if not kf:
-                raise AuthFailed(f"Site '{self.profile.name}' does not specify a key file.")
+                raise AuthFailed(t("error.auth.no_keyfile", site=self.profile.name))
             candidates = [Path(kf)]
             if kf.lower().endswith(".ppk"):
                 candidates.append(Path(kf[:-4]))  # OpenSSH copy next to the .ppk file
@@ -209,9 +210,10 @@ class SFTPConnection:
             return
         fp = "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
         if trusted:
-            raise HostKeyError(f"Host key of {self.profile.host} does NOT match the trusted key! ({fp})",
+            raise HostKeyError(t("error.hostkey.mismatch", host=self.profile.host, fingerprint=fp),
                                fp, blob, mismatch=True)
-        raise HostKeyError(f"Unknown host key for {self.profile.host} ({key.get_name()} {fp})", fp, blob, mismatch=False)
+        raise HostKeyError(t("error.hostkey.unknown", host=self.profile.host, type=key.get_name(), fingerprint=fp),
+                           fp, blob, mismatch=False)
 
     def connect(self) -> SFTPSession:
         """Open a new session. Handshakes are serialized with a short gap because
@@ -231,11 +233,11 @@ class SFTPConnection:
         try:
             sock = socket.create_connection((p.host, p.port), timeout=self.timeout)
         except socket.gaierror as e:
-            raise ConnectionFailed(f"Cannot resolve {p.host}: {e}") from e
+            raise ConnectionFailed(t("error.connect.resolve", host=p.host, error=e)) from e
         except (socket.timeout, TimeoutError) as e:
-            raise ConnectionFailed(f"Timed out connecting to {p.host}:{p.port}") from e
+            raise ConnectionFailed(t("error.connect.timeout", host=p.host, port=p.port)) from e
         except OSError as e:
-            raise ConnectionFailed(f"Cannot connect to {p.host}:{p.port}: {e}") from e
+            raise ConnectionFailed(t("error.connect.failed", host=p.host, port=p.port, error=e)) from e
         transport = paramiko.Transport(sock, default_window_size=64 * 1024 * 1024)
         try:
             transport.banner_timeout = self.timeout
@@ -254,25 +256,24 @@ class SFTPConnection:
                         except paramiko.AuthenticationException:
                             continue
                     if not transport.is_authenticated():
-                        raise AuthFailed("Cannot use the site's key file (or any SSH agent key).")
+                        raise AuthFailed(t("error.auth.key_unusable"))
             elif p.logontype == LOGON_NORMAL and p.password is not None:
                 transport.auth_password(p.user, p.password)
             else:
-                raise AuthFailed(f"Site '{p.name}' has no saved credentials usable without prompting "
-                                 "(use a key file or a saved password).")
+                raise AuthFailed(t("error.auth.no_credentials", site=p.name))
             transport.set_keepalive(30)
             sftp = paramiko.SFTPClient.from_transport(transport)
             sftp.get_channel().settimeout(config.IO_TIMEOUT)
             return SFTPSession(transport, sftp)
         except paramiko.AuthenticationException as e:
             transport.close()
-            raise AuthFailed(f"Authentication rejected for {p.user}@{p.host}: {e}") from e
+            raise AuthFailed(t("error.auth.rejected", user=p.user, host=p.host, error=e)) from e
         except ConnectionFailed:
             transport.close()
             raise
         except Exception as e:
             transport.close()
-            raise ConnectionFailed(f"SSH error: {e}") from e
+            raise ConnectionFailed(t("error.ssh", error=e)) from e
 
     def connect_with_retry(self, retries: int = config.CONNECT_RETRIES,
                            cancel: Optional[threading.Event] = None,
@@ -304,5 +305,5 @@ def with_retry(fn: Callable[[], SFTPSession], retries: int, cancel: Optional[thr
             else:
                 time.sleep(delay)
     if last is None:
-        raise ConnectionFailed("Operation cancelled")
+        raise ConnectionFailed(t("error.cancelled"))
     raise last

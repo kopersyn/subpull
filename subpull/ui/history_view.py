@@ -7,9 +7,11 @@ from PySide6.QtCore import QSettings, Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QAbstractItemView, QSplitter, QTableView, QWidget
 
+from ..i18n import t
+from ..workflow import fmt_size
 from .controller import Controller
 from .models import HistoryModel, OperationsModel, TextFilterProxy
-from .widgets import SearchField, TypeBadgeDelegate, button, hbox, label, vbox
+from .widgets import SearchField, Texts, TypeBadgeDelegate, hbox, headers_changed, label, vbox
 
 
 def _table(model) -> QTableView:
@@ -32,12 +34,16 @@ class HistoryPage(QWidget):
         self.setObjectName("Page")
         self.ctl = ctl
         self.qs = qs
+        self.tx = tx = Texts()
         self.count_label = label("", "Muted")
-        self.search = SearchField("Search object, file or session")
+        self.search = SearchField()
+        tx.bind(self.search.setPlaceholderText, "history.search")
+        self.search.setMinimumWidth(self.fontMetrics().averageCharWidth() * 34)
         self.search.setMaximumWidth(self.fontMetrics().averageCharWidth() * 40)
-        self.btn_open = button("Show in folder", "open", slot=self._open_selected)
+        self.btn_open = tx.button("history.show_in_folder", "open", slot=self._open_selected)
         self.btn_open.setEnabled(False)
-        header = hbox(vbox(label("History", "PageTitle"), self.count_label, spacing=2), None, self.search, self.btn_open)
+        header = hbox(vbox(tx.label("nav.history", "PageTitle"), self.count_label, spacing=2), None, self.search,
+                      self.btn_open)
 
         self.model = HistoryModel(self)
         self.proxy = TextFilterProxy(self)
@@ -56,14 +62,14 @@ class HistoryPage(QWidget):
 
         self.ops_model = OperationsModel(self)
         self.ops = _table(self.ops_model)
-        for i, w in enumerate((17, 10)):
+        for i, w in enumerate((17, 14)):
             self.ops.setColumnWidth(i, cw * w)
 
         downloads = QWidget()
-        downloads.setLayout(vbox(label("Downloaded files", "SectionTitle"), self.table, spacing=8))
+        downloads.setLayout(vbox(tx.label("history.downloads.title", "SectionTitle"), self.table, spacing=8))
         activity = QWidget()
-        activity.setLayout(vbox(label("Activity", "SectionTitle"),
-                                label("Scans, download batches and transfer errors.", "Muted"), self.ops, spacing=8))
+        activity.setLayout(vbox(tx.label("history.activity.title", "SectionTitle"),
+                                tx.label("history.activity.subtitle", "Muted"), self.ops, spacing=8))
         self.split = QSplitter(Qt.Orientation.Vertical)
         self.split.addWidget(downloads)
         self.split.addWidget(activity)
@@ -77,6 +83,13 @@ class HistoryPage(QWidget):
         ctl.historyChanged.connect(self.refresh)
         self.refresh()
 
+    def retranslate(self) -> None:
+        self.tx.retranslate()
+        for model, view in ((self.model, self.table), (self.ops_model, self.ops)):
+            headers_changed(model)
+            view.viewport().update()
+        self._update_count()
+
     def save_state(self) -> None:
         self.qs.setValue("history/split", self.split.saveState())
 
@@ -84,9 +97,13 @@ class HistoryPage(QWidget):
         rows = self.ctl.history.list_downloads(limit=20000)
         self.model.set_rows(rows)
         self.ops_model.set_rows(self.ctl.history.list_operations(limit=1000))
-        total = sum(r["size"] or 0 for r in rows)
-        from ..workflow import fmt_size
-        self.count_label.setText(f"{len(rows)} files downloaded · {fmt_size(total)}" if rows else "Nothing downloaded yet")
+        self._count = (len(rows), sum(r["size"] or 0 for r in rows))
+        self._update_count()
+
+    def _update_count(self) -> None:
+        n, total = self._count
+        self.count_label.setText(t("history.downloads.count", count=n, size=fmt_size(total)) if n
+                                 else t("history.downloads.empty"))
 
     def _open_selected(self) -> None:
         rows = self.table.selectionModel().selectedRows()

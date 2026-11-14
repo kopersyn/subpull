@@ -115,6 +115,10 @@ class UITests(unittest.TestCase):
         self.ctl.profile = self.ctl.conn.profile
 
     def tearDown(self):
+        from subpull import i18n
+        from subpull.ui import language
+        i18n.reload()
+        language.apply("en")
         self.ctl.shutdown()
         self.ctl.deleteLater()
         flush_deletes()
@@ -234,6 +238,104 @@ class UITests(unittest.TestCase):
         dlg.reject()
         w.close()
         dlg.deleteLater()
+        w.deleteLater()
+        flush_deletes()
+
+    # ------------------------------------------------------------------ localization
+    def pick_language(self, w, code: str) -> None:
+        box = w.settings.language
+        box.setCurrentIndex(box.findData(code))
+        box.activated.emit(box.currentIndex())
+        app().processEvents()
+
+    def test_language_switch_retranslates_existing_widgets(self):
+        from subpull import i18n
+        from subpull.ui.main_window import MainWindow
+        from subpull.ui.models import LogModel
+        w = MainWindow(self.ctl, LogModel())
+        w.resize(1400, 900)
+        w.show()
+        self.scan()
+        lib = w.library
+        title, model, sidebar_btn = lib.title, lib.model, w.sidebar.buttons["queue"]
+        header = lambda m, i: m.headerData(i, Qt.Orientation.Horizontal)
+        self.assertEqual((title.text(), header(model, 0), sidebar_btn.text()), ("Library", "File", "Transfers"))
+        box = w.settings.language
+        self.assertEqual([box.itemData(i) for i in range(box.count())][:2], ["auto", "en"])
+        self.assertIn("Polski", box.itemText(box.findData("pl")))
+        lib._select_visible(True)
+        selected = set(self.ctl.selected)
+
+        self.pick_language(w, "pl")
+        self.assertEqual(i18n.language(), "pl")
+        self.assertEqual(Settings.load(self.tmp / "settings.json").language, "pl")          # persisted
+        self.assertIs(lib.title, title)                                                   # same widgets, new texts
+        self.assertIs(lib.model, model)
+        self.assertEqual((title.text(), header(model, 0), sidebar_btn.text()), ("Biblioteka", "Plik", "Transfery"))
+        self.assertEqual(w.topbar.scan_btn.text(), "Skanuj")
+        self.assertEqual(w.topbar.scan_btn.toolTip(), "Skanuj folder zdalny (F5). Nic nie jest pobierane.")
+        self.assertEqual(lib.btn_unrec.text(), "1 nierozpoznany")
+        self.assertEqual(lib.btn_download.text(), f"Pobierz {len(selected)} plików")
+        self.assertEqual(lib.btn_select.menu().actions()[0].text(), "Zaznacz wszystkie widoczne")
+        self.assertEqual(lib.obj_model.index(0).data(), "Wszystkie obiekty")
+        self.assertEqual(lib.session_cb.itemText(0), "Wszystkie sesje")
+        self.assertIn("5 klatek", lib.subtitle.text())
+        self.assertTrue(self.ctl.conn_state[1].startswith("Połączono"), self.ctl.conn_state)  # dynamic status follows
+        self.assertEqual(w.sidebar.conn_label.text(), self.ctl.conn_state[1])
+        self.assertEqual(header(w.queue.model, 2), "Stan")
+        self.assertEqual(header(w.history.model, 0), "Pobrano")
+        self.assertEqual(header(w.logs.model, 3), "Komunikat")
+        self.assertEqual(w.logs.level.itemText(3), "Tylko błędy")
+        self.assertEqual(w.windowTitle(), config.APP_NAME)
+        self.assertEqual(set(self.ctl.selected), selected)                                # state is untouched
+        self.assertEqual(len(lib.model.visible_files()), 5)
+
+        self.pick_language(w, "en")
+        self.assertEqual((title.text(), header(model, 0), sidebar_btn.text()), ("Library", "File", "Transfers"))
+        self.assertEqual(Settings.load(self.tmp / "settings.json").language, "en")
+        w.close()
+        w.deleteLater()
+        flush_deletes()
+
+    def test_right_to_left_language_flips_the_layout(self):
+        import json
+        from subpull import i18n
+        from subpull.i18n.locale_file import LOCALES_DIR
+        locales = self.tmp / "locales"
+        locales.mkdir()
+        (locales / "en.json").write_bytes((LOCALES_DIR / "en.json").read_bytes())
+        (locales / "ar.json").write_text(json.dumps({
+            "_meta": {"code": "ar", "name": "العربية", "english_name": "Arabic", "direction": "rtl"},
+            "translations": {"nav.library": "المكتبة"}}, ensure_ascii=False), encoding="utf-8")
+        i18n.reload(locales)
+        self.ctl.set_language("ar")
+        self.assertEqual(app().layoutDirection(), Qt.LayoutDirection.RightToLeft)
+        self.assertEqual(i18n.t("nav.library"), "المكتبة")
+        self.assertEqual(i18n.t("nav.history"), "History")                                # partial → English fallback
+        self.ctl.set_language("en")
+        self.assertEqual(app().layoutDirection(), Qt.LayoutDirection.LeftToRight)
+
+    def test_starts_in_a_translation_without_network(self):
+        import socket
+        import sys
+        from unittest import mock
+        from subpull.ui.main_window import MainWindow
+        from subpull.ui.models import LogModel
+        self.ctl.settings.language = "pl"
+        offline = OSError("network is disabled in this test")
+        with mock.patch.object(socket, "socket", side_effect=offline), \
+                mock.patch.object(socket, "create_connection", side_effect=offline), \
+                mock.patch.object(socket, "getaddrinfo", side_effect=offline):
+            self.ctl.apply_language()
+            w = MainWindow(self.ctl, LogModel())
+            w.show()
+            for key in ("queue", "history", "logs", "settings", "library"):
+                w.show_page(key)
+                app().processEvents()
+            self.assertEqual(w.library.title.text(), "Biblioteka")
+            self.assertEqual(w.queue.state_label.text(), "Bezczynny")
+        self.assertNotIn("PySide6.QtNetwork", sys.modules)
+        w.close()
         w.deleteLater()
         flush_deletes()
 

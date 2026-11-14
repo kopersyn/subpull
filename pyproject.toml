@@ -37,3 +37,4 @@ include = ["subpull*"]
 
 [tool.setuptools.package-data]
 "subpull.ui" = ["assets/*.svg"]
+"subpull.i18n" = ["locales/*.json"]
