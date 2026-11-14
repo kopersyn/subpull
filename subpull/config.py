@@ -66,6 +66,7 @@ class Settings:
     read_fits: bool = True                   # verify every FITS file against its header while scanning
     parallel_transfers: int = 3
     placeholder_objects: list = field(default_factory=lambda: list(DEFAULT_PLACEHOLDER_OBJECTS))
+    language: str = "auto"                   # interface language code ("pl", "pt-BR"…) or "auto" = system language
 
     @property
     def dest_path(self) -> Optional[Path]:

@@ -29,8 +29,10 @@ Built with Python and Qt (PySide6): a dark, high-DPI-aware desktop UI for Window
   states (queued, downloading, verifying, done, skipped, error, cancelled); stop, cancel, retry.
 - **History** – every downloaded file (searchable) plus an activity list of scans, batches and errors.
 - **Activity log** – searchable log with severity filter.
-- **Settings** – connection (FileZilla site, server, user, auth method, test), library location,
-  scanning, transfers and data folders, each in its own section.
+- **Settings** – language, connection (FileZilla site, server, user, auth method, test), library
+  location, scanning, transfers and data folders, each in its own section.
+- **Languages** – English and Polish, switchable at runtime; translations are community-maintained
+  and bundled with the application ([help translate](#help-translate-subpull)).
 - Keyboard: `F5` scan, `Ctrl+1…5` pages, `Ctrl+F` search files, `Space` toggles highlighted rows.
 
 **Core**
@@ -117,21 +119,49 @@ python -m venv .venv
 | FileZilla sites (read-only) | `%APPDATA%\FileZilla` | `~/.config/filezilla` | `~/.config/filezilla` |
 
 `ui.ini` stores window layout (columns, splitters, sidebar). `settings.json` keys: `profile_name`, `dest_root`, `source_dir`, `read_fits`,
-`parallel_transfers`, `placeholder_objects` (OBJECT values treated as "unknown").
+`parallel_transfers`, `placeholder_objects` (OBJECT values treated as "unknown"), `language`
+(a language code such as `pl`, or `auto` to follow the system language).
 
 While a file downloads it is named `<file>.subpull-part`; it is renamed to the original name after
 verification. A leftover `.subpull-part` is resumed the next time you download that file.
+
+## Help Translate SubPull
+
+SubPull welcomes community translations. Every language is one JSON text file in
+[`subpull/i18n/locales`](subpull/i18n/locales) that you can edit directly on GitHub – no programming
+needed. Copy the English file, translate the texts on the right-hand side, open a pull request, and
+an automatic check tells you within a minute whether the file is valid. Partial translations are
+fine: anything not translated yet is shown in English.
+
+- 🌍 [**Translate SubPull**](translations/README.md) – step-by-step instructions for a new language
+- ✏️ [**Improve an existing translation**](https://github.com/kopersyn/subpull/tree/main/subpull/i18n/locales) –
+  open a language file and click the pencil icon
+- 📋 [**Supported languages**](translations/README.md#supported-languages) – the list below, always calculated from the files
+- 🐞 [**Report a translation mistake**](https://github.com/kopersyn/subpull/issues/new?template=translation.yml)
+
+<!-- translation-status:start -->
+| Language | Code | Translated | Status | Maintainers |
+|---|---|---|---|---|
+| English | `en` | 100% (343/343) | Source language | kopersyn |
+| Polski (Polish) | `pl` | 100% (343/343) | Complete |  |
+<!-- translation-status:end -->
+
+The language is chosen in **Settings → Language** (automatic by default) and changes immediately.
+All translations ship with the application; nothing is downloaded.
 
 ## Development
 
 ```bash
 pip install -e .
 python -m unittest discover -s tests -t .
+python -m subpull.i18n.validate          # check the translation files
+python -m subpull.i18n.stats --write     # refresh the language tables in the documentation
 ```
 
 The tests use a local directory as a fake server, so they need no network; the Qt tests run
 headless (`QT_QPA_PLATFORM=offscreen`). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
-module layout, the GUI technology decision and packaging notes (PyInstaller).
+module layout, the GUI technology decision and packaging notes (PyInstaller), and
+[CONTRIBUTING.md](CONTRIBUTING.md) for how to contribute.
 
 ## License
 

@@ -8,12 +8,14 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QAbstractItemView, QComboBox, QTableView, QWidget
 
 from .. import config
+from ..i18n import t
 from .models import LogFilterProxy, LogModel
 from .theme import mono_font
-from .widgets import LevelDelegate, SearchField, button, hbox, label, vbox
+from .widgets import LevelDelegate, SearchField, Texts, hbox, headers_changed, label, vbox
 
-LEVELS = [("All messages", logging.DEBUG), ("Info and above", logging.INFO), ("Warnings and errors", logging.WARNING),
-          ("Errors only", logging.ERROR)]
+# (translation key, minimum level shown)
+LEVELS = [("logs.filter.all", logging.DEBUG), ("logs.filter.info", logging.INFO),
+          ("logs.filter.warning", logging.WARNING), ("logs.filter.error", logging.ERROR)]
 
 
 class LogsPage(QWidget):
@@ -23,18 +25,22 @@ class LogsPage(QWidget):
         self.model = model
         self.proxy = LogFilterProxy(self)
         self.proxy.setSourceModel(model)
+        self.tx = tx = Texts()
         self.level = QComboBox()
-        for text, lvl in LEVELS:
-            self.level.addItem(text, lvl)
+        for text_key, lvl in LEVELS:
+            self.level.addItem(t(text_key), lvl)
         self.level.setCurrentIndex(1)
-        self.search = SearchField("Search messages")
+        self.search = SearchField()
+        tx.bind(self.search.setPlaceholderText, "logs.search")
         self.search.setMaximumWidth(self.fontMetrics().averageCharWidth() * 40)
         self.level.currentIndexChanged.connect(self._apply)
         self.search.textChanged.connect(self._apply)
         self.counts = label("", "Muted")
-        header = hbox(vbox(label("Activity log", "PageTitle"), self.counts, spacing=2), None, self.level, self.search,
-                      button("Open log file", "open", tooltip=str(config.LOG_FILE),
-                             slot=lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(config.LOG_FILE)))))
+        open_log = tx.button("logs.open_file", "open",
+                             slot=lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(config.LOG_FILE))))
+        open_log.setToolTip(str(config.LOG_FILE))
+        header = hbox(vbox(tx.label("nav.logs", "PageTitle"), self.counts, spacing=2), None, self.level, self.search,
+                      open_log)
         self.table = QTableView()
         self.table.setModel(self.proxy)
         self.table.verticalHeader().hide()
@@ -52,6 +58,14 @@ class LogsPage(QWidget):
         model.rowsInserted.connect(self._on_rows)
         self._apply()
 
+    def retranslate(self) -> None:
+        self.tx.retranslate()
+        for i, (text_key, _) in enumerate(LEVELS):
+            self.level.setItemText(i, t(text_key))
+        headers_changed(self.model)
+        self.table.viewport().update()
+        self._update_counts()
+
     def _apply(self, *_):
         self.proxy.set_filter(self.level.currentData(), self.search.text().strip())
         self._update_counts()
@@ -64,4 +78,5 @@ class LogsPage(QWidget):
 
     def _update_counts(self):
         err, warn = self.model.counts()
-        self.counts.setText(f"{self.model.rowCount()} messages · {warn} warnings · {err} errors")
+        self.counts.setText(" · ".join((t("count.messages", count=self.model.rowCount()),
+                                        t("count.warnings", count=warn), t("count.errors", count=err))))

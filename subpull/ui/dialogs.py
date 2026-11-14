@@ -6,14 +6,38 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QHeaderView, QMessageBox, QTableView, QWidget)
 
 from ..connection import AuthFailed, HostKeyError
+from ..i18n import t
 from ..local_state import LocalStatus
-from ..workflow import OVERWRITE_STATES, DownloadPlan, fmt_size
+from ..workflow import OVERWRITE_STATES, SKIP_QUEUED, DownloadPlan, fmt_size
 from .theme import T
 from .widgets import Card, SearchField, button, hbox, label, vbox
 
 
+_ROLES = {"ok": QMessageBox.ButtonRole.AcceptRole, "yes": QMessageBox.ButtonRole.YesRole,
+          "retry": QMessageBox.ButtonRole.AcceptRole, "no": QMessageBox.ButtonRole.NoRole,
+          "cancel": QMessageBox.ButtonRole.RejectRole}
+
+
+def message(parent, icon, title: str, text: str, buttons=("ok",), default: str = "", extra: str = "") -> str:
+    """Modal message box whose buttons are labelled in the selected language. ``buttons`` are
+    names from ``actions.*`` (ok, yes, no, retry, cancel); ``extra`` is the text of an additional
+    accept button. Returns the name of the clicked button ("extra" for the additional one);
+    closing the box counts as its last button."""
+    box = QMessageBox(icon, title, text, QMessageBox.StandardButton.NoButton, parent)
+    made = {name: box.addButton(t(f"actions.{name}"), _ROLES[name]) for name in buttons}
+    if extra:
+        made = {"extra": box.addButton(extra, QMessageBox.ButtonRole.AcceptRole), **made}
+    last = list(made)[-1]
+    box.setEscapeButton(made[last])
+    if default in made:
+        box.setDefaultButton(made[default])
+    box.exec()
+    clicked = box.clickedButton()
+    return next((name for name, b in made.items() if b is clicked), last)
+
+
 class _PlanModel(QAbstractTableModel):
-    COLUMNS = ["Object", "Files", "Size", "Skipped", "Saved to"]
+    COLUMNS = ["column.object", "column.files", "column.size", "column.skipped", "column.saved_to"]
 
     def __init__(self, plan: DownloadPlan):
         super().__init__()
@@ -31,13 +55,13 @@ class _PlanModel(QAbstractTableModel):
         return 5
 
     def headerData(self, s, o, role=Qt.ItemDataRole.DisplayRole):
-        return self.COLUMNS[s] if o == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole else None
+        return t(self.COLUMNS[s]) if o == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole else None
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         r = self.plan.rows[index.row()]
         c = index.column()
         if role == Qt.ItemDataRole.DisplayRole:
-            dest = r.dest_error or (f"{r.dest}" + ("   · new folder" if r.new_folder else ""))
+            dest = r.dest_error or (f"{r.dest}" + (f"   · {t('confirm.new_folder')}" if r.new_folder else ""))
             return [r.object_name, str(r.count), fmt_size(r.size), str(r.skipped) if r.skipped else "", dest][c]
         if role == Qt.ItemDataRole.ForegroundRole:
             if c == 4 and r.dest_error:
@@ -53,15 +77,15 @@ class ConfirmDownloadDialog(QDialog):
     """Shows exactly what will be downloaded and where. Overwrites are opt-in and confirmed twice."""
 
     OPTIONS = [
-        (LocalStatus.PRESENT, "Download again files already in the library (same size) – overwrites them"),
-        (LocalStatus.CONFLICT, "Replace local files whose size differs – overwrites them"),
-        (LocalStatus.HISTORY_ONLY, "Download again files from history that are no longer on disk"),
+        (LocalStatus.PRESENT, "confirm.option.present"),
+        (LocalStatus.CONFLICT, "confirm.option.conflict"),
+        (LocalStatus.HISTORY_ONLY, "confirm.option.history_only"),
     ]
 
     def __init__(self, ctl, parent: QWidget = None):
         super().__init__(parent)
         self.ctl = ctl
-        self.setWindowTitle("Confirm download")
+        self.setWindowTitle(t("confirm.window_title"))
         self.setModal(True)
         fm = self.fontMetrics()
         self.resize(fm.averageCharWidth() * 130, fm.height() * 30)
@@ -71,13 +95,12 @@ class ConfirmDownloadDialog(QDialog):
         for st, text in self.OPTIONS:
             n = base.counts.get(st, 0)
             if n:
-                cb = QCheckBox(f"{text}  ({n})")
+                cb = QCheckBox(f"{t(text)}  ({n})")
                 cb.toggled.connect(self.refresh)
                 self.checks[st] = cb
                 opts.append(cb)
         clash = base.counts.get(LocalStatus.NAME_CLASH, 0)
-        clash_lbl = label(f"{clash} files are skipped: another scanned file has the same name for that object, or the "
-                          "name is not valid as a file name. Names are never changed automatically.", wrap=True)
+        clash_lbl = label(t("confirm.clash", count=clash), wrap=True)
         clash_lbl.setStyleSheet(f"color: {T['danger']};")
         clash_lbl.setVisible(bool(clash))
 
@@ -95,18 +118,17 @@ class ConfirmDownloadDialog(QDialog):
 
         self.summary = label("", "SectionTitle")
         self.note = label("", "Muted", wrap=True)
-        self.btn_ok = button("Download", "download", "Primary", slot=self._accept)
+        self.btn_ok = button(t("actions.download"), "download", "Primary", slot=self._accept)
         self.btn_ok.setDefault(True)
         options_card = Card()
-        options_card.setLayout(vbox(label("Files already handled", "SectionTitle"),
-                                      label("By default SubPull skips files that are already in your library or in the "
-                                            "download history.", "Muted", wrap=True), *opts, clash_lbl,
+        options_card.setLayout(vbox(label(t("confirm.handled.title"), "SectionTitle"),
+                                      label(t("confirm.handled.text"), "Muted", wrap=True), *opts, clash_lbl,
                                       spacing=6, margins=(14, 12, 14, 12)))
         options_card.setVisible(bool(opts) or bool(clash))
-        self.setLayout(vbox(label("Review download", "PageTitle"),
-                            label(f"Destination: {ctl.dest_root}", "Muted", selectable=True),
+        self.setLayout(vbox(label(t("confirm.title"), "PageTitle"),
+                            label(t("confirm.destination", path=ctl.dest_root), "Muted", selectable=True),
                             options_card, table, self.summary, self.note,
-                            hbox(None, button("Cancel", slot=self.reject), self.btn_ok),
+                            hbox(None, button(t("actions.cancel"), slot=self.reject), self.btn_ok),
                             spacing=10, margins=(20, 18, 20, 18)))
         self.refresh()
 
@@ -116,16 +138,17 @@ class ConfirmDownloadDialog(QDialog):
     def refresh(self, *_):
         self.plan = self.ctl.plan(self.include())
         self.model.set_plan(self.plan)
-        queued = sum(1 for _, why in self.plan.skipped if why == "already in the transfer queue")
-        self.summary.setText(f"{len(self.plan.todo)} files · {fmt_size(self.plan.size)}")
-        notes = [f"{len(self.plan.skipped)} skipped"] if self.plan.skipped else []
+        queued = sum(1 for _, why in self.plan.skipped if why == SKIP_QUEUED)
+        self.summary.setText(f"{t('count.files', count=len(self.plan.todo))} · {fmt_size(self.plan.size)}")
+        notes = [t("count.skipped", count=len(self.plan.skipped))] if self.plan.skipped else []
         if queued:
-            notes.append(f"{queued} already queued")
+            notes.append(t("confirm.note.queued", count=queued))
         if self.plan.overwrite_count:
-            notes.append(f"{self.plan.overwrite_count} existing files will be overwritten")
+            notes.append(t("confirm.note.overwrite", count=self.plan.overwrite_count))
         self.note.setText(" · ".join(notes))
         self.note.setStyleSheet(f"color: {T['warning']};" if self.plan.overwrite_count else "")
-        self.btn_ok.setText(f"Download {len(self.plan.todo)} files" if self.plan.todo else "Nothing to download")
+        self.btn_ok.setText(t("actions.download_count", count=len(self.plan.todo)) if self.plan.todo
+                            else t("confirm.nothing"))
         self.btn_ok.setEnabled(bool(self.plan.todo))
 
     def overwrite_states(self) -> set[LocalStatus]:
@@ -133,12 +156,9 @@ class ConfirmDownloadDialog(QDialog):
 
     def _accept(self):
         if self.plan.overwrite_count:
-            r = QMessageBox.warning(self, "Overwrite files",
-                                    f"{self.plan.overwrite_count} files that already exist in your library will be "
-                                    "replaced by the server version.\n\nContinue?",
-                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                                    QMessageBox.StandardButton.Cancel)
-            if r != QMessageBox.StandardButton.Yes:
+            if message(self, QMessageBox.Icon.Warning, t("confirm.overwrite.title"),
+                       t("confirm.overwrite.text", count=self.plan.overwrite_count),
+                       ("yes", "cancel"), default="cancel") != "yes":
                 return
         self.accept()
 
@@ -155,7 +175,9 @@ class _UnrecModel(QAbstractTableModel):
         return 3
 
     def headerData(self, s, o, role=Qt.ItemDataRole.DisplayRole):
-        return ["Path", "Size", "Reason"][s] if o == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole else None
+        if o == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
+            return t(("column.path", "column.size", "column.reason")[s])
+        return None
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         u = self.rows[index.row()]
@@ -171,7 +193,7 @@ class _UnrecModel(QAbstractTableModel):
 class UnrecognizedDialog(QDialog):
     def __init__(self, result, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Unrecognized items")
+        self.setWindowTitle(t("unrecognized.window_title"))
         fm = self.fontMetrics()
         self.resize(fm.averageCharWidth() * 150, fm.height() * 30)
         from PySide6.QtCore import QSortFilterProxyModel
@@ -180,7 +202,7 @@ class UnrecognizedDialog(QDialog):
         proxy.setSourceModel(model)
         proxy.setFilterKeyColumn(-1)
         proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        search = SearchField("Filter")
+        search = SearchField(t("unrecognized.filter"))
         search.textChanged.connect(proxy.setFilterFixedString)
         table = QTableView()
         table.setModel(proxy)
@@ -193,36 +215,27 @@ class UnrecognizedDialog(QDialog):
         table.setColumnWidth(0, fm.averageCharWidth() * 80)
         table.setColumnWidth(1, fm.averageCharWidth() * 10)
         self.setLayout(vbox(
-            label(f"{len(result.unrecognized)} unrecognized items", "PageTitle"),
-            label("These files have no unambiguous object (for example OBJECT = 'Target' in a folder without an object "
-                  "name) or are folders that are not frame types. SubPull never downloads them, so nothing ends up in a "
-                  "random folder.", "Muted", wrap=True),
-            search, table, hbox(None, button("Close", slot=self.accept)), spacing=10, margins=(20, 18, 20, 18)))
+            label(t("unrecognized.title", count=len(result.unrecognized)), "PageTitle"),
+            label(t("unrecognized.text"), "Muted", wrap=True),
+            search, table, hbox(None, button(t("actions.close"), slot=self.accept)), spacing=10, margins=(20, 18, 20, 18)))
 
 
 def show_error(parent, exc: Exception, retry) -> None:
     """Explain a connection problem; offers retry where it can help, trust-once for unknown host keys."""
     if isinstance(exc, HostKeyError):
         if exc.mismatch:
-            QMessageBox.critical(parent, "Host key mismatch",
-                                 f"{exc}\n\nThe server identifies itself with a different key than the one FileZilla "
-                                 "trusts. The connection was blocked. Check the server in FileZilla before continuing.")
+            message(parent, QMessageBox.Icon.Critical, t("hostkey.mismatch.title"),
+                    f"{exc}\n\n{t('hostkey.mismatch.text')}")
             return
-        box = QMessageBox(QMessageBox.Icon.Warning, "Unknown host key",
-                          f"{exc}\n\nThis key is not stored in FileZilla or known_hosts. Trust it for this session "
-                          "only? (Nothing is saved.)", QMessageBox.StandardButton.NoButton, parent)
-        trust = box.addButton("Trust for this session", QMessageBox.ButtonRole.AcceptRole)
-        box.addButton(QMessageBox.StandardButton.Cancel)
-        box.exec()
-        if box.clickedButton() is trust and retry:
+        clicked = message(parent, QMessageBox.Icon.Warning, t("hostkey.unknown.title"),
+                          f"{exc}\n\n{t('hostkey.unknown.text')}", ("cancel",), extra=t("hostkey.unknown.trust"))
+        if clicked == "extra" and retry:
             parent.ctl.conn.accept_hostkey_for_session(exc.key_blob)
             retry()
         return
     if isinstance(exc, AuthFailed) or retry is None:
-        QMessageBox.critical(parent, "Connection problem", str(exc))
+        message(parent, QMessageBox.Icon.Critical, t("error.connection.title"), str(exc))
         return
-    r = QMessageBox.warning(parent, "Connection problem", f"{exc}\n\nTry again?",
-                            QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Cancel,
-                            QMessageBox.StandardButton.Retry)
-    if r == QMessageBox.StandardButton.Retry:
+    if message(parent, QMessageBox.Icon.Warning, t("error.connection.title"), f"{exc}\n\n{t('error.connection.retry')}",
+               ("retry", "cancel"), default="retry") == "retry":
         retry()

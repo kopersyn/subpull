@@ -1,0 +1,37 @@
+name: translations
+
+# Checks the community translation files. Needs nothing but Python itself.
+on:
+  pull_request:
+    paths:
+      - "subpull/i18n/**"
+      - ".github/workflows/translations.yml"
+  push:
+    branches: [main]
+    paths:
+      - "subpull/i18n/**"
+      - ".github/workflows/translations.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Validate translation files
+        run: python -m subpull.i18n.validate
+      - name: Translation progress
+        if: always()
+        run: |
+          echo "### Translation progress" >> "$GITHUB_STEP_SUMMARY"
+          python -m subpull.i18n.stats >> "$GITHUB_STEP_SUMMARY"
+      - name: Status tables in the documentation
+        if: github.event_name == 'push'
+        run: |
+          python -m subpull.i18n.stats --check \
+            || echo "::warning::The translation status tables are out of date - run: python -m subpull.i18n.stats --write"

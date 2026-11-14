@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from . import config
+from .i18n import t
 
 # Names are validated against Windows rules on every platform so a library stays portable.
 _INVALID = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -27,11 +28,17 @@ class LocalStatus(str, Enum):
     NAME_CLASH = "name clash"                     # ≥2 remote files would land on the same path
 
 
+def status_label(status: LocalStatus) -> str:
+    """The status as shown to the user (the enum value itself is a stable identifier)."""
+    return t(f"status.local.{status.name.lower()}")
+
+
 def validate_name(name: str, what: str) -> None:
+    """``what`` is "object" or "file"."""
     if not name or name in (".", ".."):
-        raise InvalidName(f"Empty or invalid {what} name")
+        raise InvalidName(t(f"error.name.empty_{what}"))
     if _INVALID.search(name) or name.endswith((" ", ".")) or name.split(".")[0].upper() in _RESERVED:
-        raise InvalidName(f"{what.capitalize()} name '{name}' is not a valid folder/file name – skipped (names are never changed)")
+        raise InvalidName(t(f"error.name.invalid_{what}", name=name))
 
 
 def dest_dir(object_name: str, root: Path) -> Path:
@@ -70,12 +77,12 @@ def local_status(f, history_rows: dict, clashes: set[str], root: Path) -> tuple[
         lsize = dest.stat().st_size
         if lsize == f.size:
             return LocalStatus.PRESENT, None
-        return LocalStatus.CONFLICT, f"local {lsize} B, server {f.size} B"
+        return LocalStatus.CONFLICT, t("status.detail.size_conflict", local=lsize, server=f.size)
     if f.remote_path in clashes:
-        return LocalStatus.NAME_CLASH, "another scanned file has the same name for this object"
+        return LocalStatus.NAME_CLASH, t("status.detail.same_name")
     if part_path(dest).exists():
-        return LocalStatus.PARTIAL, f"{part_path(dest).stat().st_size} B downloaded"
+        return LocalStatus.PARTIAL, t("status.detail.partial", size=part_path(dest).stat().st_size)
     row = history_rows.get(f.remote_path)
     if row is not None:
-        return LocalStatus.HISTORY_ONLY, f"was saved to {row['local_path']}"
+        return LocalStatus.HISTORY_ONLY, t("status.detail.history", path=row["local_path"])
     return LocalStatus.NEW, None

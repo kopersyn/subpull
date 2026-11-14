@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QFra
                                QProgressBar, QPushButton, QSizePolicy, QStyle, QStyledItemDelegate,
                                QStyleOptionViewItem, QToolButton, QVBoxLayout, QWidget)
 
+from ..i18n import t
+from ..local_state import LocalStatus, status_label
 from ..workflow import fmt_size
 from . import icons
 from .models import GroupRole, LevelRole, ProgressRole, StateRole, StatusRole, SummaryRole, TypeRole
@@ -85,6 +87,48 @@ def tool_button(icon_name: str, tooltip: str, slot=None, name: str = "Ghost") ->
     return b
 
 
+class Texts:
+    """Remembers which translation key every static text shows, so that a language change can
+    re-apply all of them to the existing widgets (nothing is rebuilt)."""
+
+    def __init__(self):
+        self._bound: list[tuple] = []
+
+    def bind(self, setter, key: str, **params) -> None:
+        """Call ``setter(t(key, **params))`` now and again whenever the language changes."""
+        self._bound.append((setter, key, params))
+        setter(t(key, **params))
+
+    def label(self, key: str, name: Optional[str] = None, wrap: bool = False, selectable: bool = False,
+              **params) -> QLabel:
+        lb = label("", name, wrap, selectable)
+        self.bind(lb.setText, key, **params)
+        return lb
+
+    def button(self, key: str, icon_name: Optional[str] = None, kind: Optional[str] = None,
+               tooltip: Optional[str] = None, slot=None) -> QPushButton:
+        b = button("", icon_name, kind, slot=slot)
+        self.bind(b.setText, key)
+        if tooltip:
+            self.bind(b.setToolTip, tooltip)
+        return b
+
+    def tool_button(self, icon_name: str, tooltip: str, slot=None) -> QToolButton:
+        b = tool_button(icon_name, "", slot)
+        self.bind(b.setToolTip, tooltip)
+        return b
+
+    def retranslate(self) -> None:
+        for setter, key, params in self._bound:
+            setter(t(key, **params))
+
+
+def headers_changed(model) -> None:
+    """Tell the views of ``model`` that its (translated) header texts changed."""
+    if model.columnCount():
+        model.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, model.columnCount() - 1)
+
+
 class Card(QFrame):
     def __init__(self, name: str = "Card", parent=None):
         super().__init__(parent)
@@ -118,7 +162,7 @@ class StatusDot(QWidget):
 
 
 class SearchField(QLineEdit):
-    def __init__(self, placeholder: str = "Search", parent=None):
+    def __init__(self, placeholder: str = "", parent=None):
         super().__init__(parent)
         self.setPlaceholderText(placeholder)
         self.setClearButtonEnabled(True)
@@ -126,29 +170,36 @@ class SearchField(QLineEdit):
 
 
 class Segmented(QWidget):
-    """Exclusive segmented control. Emits ``changed(key)``."""
+    """Exclusive segmented control. ``options`` are ``(key, translation key)`` pairs. Emits ``changed(key)``."""
     changed = Signal(str)
 
     def __init__(self, options: list[tuple[str, str]], current: str, parent=None):
         super().__init__(parent)
         lay = hbox(spacing=0)
         self.setLayout(lay)
+        self._options = options
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
         self._buttons: dict[str, QPushButton] = {}
-        for i, (key, text) in enumerate(options):
-            b = QPushButton(text)
+        for i, (key, _) in enumerate(options):
+            b = QPushButton()
             b.setCheckable(True)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setObjectName("SegmentFirst" if i == 0 else ("SegmentLast" if i == len(options) - 1 else "Segment"))
             b.setChecked(key == current)
             b.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-            fm = b.fontMetrics()  # extra slack: fractional scaling (125 %, 175 %) rounds glyph advances up
-            b.setFixedWidth(int(fm.horizontalAdvance(text) * 1.15) + 2 * fm.averageCharWidth() + 16)
             b.clicked.connect(lambda _=False, k=key: self.changed.emit(k))
             self._group.addButton(b)
             self._buttons[key] = b
             lay.addWidget(b)
+        self.retranslate()
+
+    def retranslate(self) -> None:
+        for key, text_key in self._options:
+            b, text = self._buttons[key], t(text_key)
+            b.setText(text)
+            fm = b.fontMetrics()  # extra slack: fractional scaling (125 %, 175 %) rounds glyph advances up
+            b.setFixedWidth(int(fm.horizontalAdvance(text) * 1.15) + 2 * fm.averageCharWidth() + 16)
 
     def set_current(self, key: str) -> None:
         if key in self._buttons:
@@ -158,7 +209,7 @@ class Segmented(QWidget):
 class TypeChip(QToolButton):
     """Checkable frame-type filter chip with a colored marker."""
 
-    def __init__(self, frame_type: str, text: str, parent=None):
+    def __init__(self, frame_type: str, text: str = "", parent=None):
         super().__init__(parent)
         self.frame_type = frame_type
         self.setText(text)
@@ -205,11 +256,14 @@ class EmptyState(QWidget):
 
 
 class StatTile(QWidget):
-    def __init__(self, caption: str, parent=None):
+    def __init__(self, caption: str = "", parent=None):
         super().__init__(parent)
         self.value = label("—", "StatValue")
         self.caption = label(caption.upper(), "StatLabel")
         self.setLayout(vbox(self.value, self.caption, spacing=2))
+
+    def set_caption(self, caption: str) -> None:
+        self.caption.setText(caption.upper())
 
 
 # =========================================================================== delegates
@@ -281,8 +335,8 @@ class FrameDelegate(_BaseDelegate):
         if col == "local":
             self._background(painter, option, index)
             st = index.data(StatusRole)[0]
-            _dot_text(painter, option.rect, STATUS_COLORS.get(st.value, T["muted"]), st.value, option.font,
-                      T["text"] if st.value == "new" else T["text2"])
+            _dot_text(painter, option.rect, STATUS_COLORS.get(st.value, T["muted"]), status_label(st), option.font,
+                      T["text"] if st == LocalStatus.NEW else T["text2"])
             return
         super().paint(painter, option, index)
 
@@ -309,13 +363,10 @@ class FrameDelegate(_BaseDelegate):
         painter.drawText(QRect(tr.left() + 2, tr.top(), name_w + 2, tr.height()),
                          Qt.AlignmentFlag.AlignVCenter, fmb.elidedText(text, Qt.TextElideMode.ElideRight, name_w))
         s = index.data(SummaryRole)
-        parts = [f"{s['files']} files", fmt_size(s['size'])]
-        if s["new"]:
-            parts.append(f"{s['new']} new")
-        if s["local"]:
-            parts.append(f"{s['local']} local")
-        if s["selected"]:
-            parts.append(f"{s['selected']} selected")
+        parts = [t("count.files", count=s["files"]), fmt_size(s["size"])]
+        for what in ("new", "local", "selected"):
+            if s[what]:
+                parts.append(t(f"count.{what}", count=s[what]))
         painter.setFont(option.font)
         painter.setPen(QColor(T["muted"]))
         x = tr.left() + name_w + 16
@@ -354,8 +405,8 @@ class ObjectDelegate(QStyledItemDelegate):
             bf.setPointSizeF(max(7.5, bf.pointSizeF() - 1.5))
             bf.setWeight(QFont.Weight.DemiBold)
             bfm = QFontMetrics(bf)
-            t = f"{s.new} new"
-            badge_w = bfm.horizontalAdvance(t) + 12
+            badge = t("count.new", count=s.new)
+            badge_w = bfm.horizontalAdvance(badge) + 12
             top0 = r.top() + (r.height() - 2 * fm.height() - 2) / 2
             br = QRectF(r.right() - pad - badge_w, top0 + (fm.height() - bfm.height() - 2) / 2, badge_w, bfm.height() + 2)
             painter.setPen(Qt.PenStyle.NoPen)
@@ -363,7 +414,7 @@ class ObjectDelegate(QStyledItemDelegate):
             painter.drawRoundedRect(br, 4, 4)
             painter.setPen(QColor(T["accent_hover"]))
             painter.setFont(bf)
-            painter.drawText(br, Qt.AlignmentFlag.AlignCenter, t)
+            painter.drawText(br, Qt.AlignmentFlag.AlignCenter, badge)
         name_w = int(r.width() - 2 * pad - (badge_w + 8 if badge_w else 0))
         text_w = int(r.width() - 2 * pad)
         top = r.top() + (r.height() - 2 * fm.height() - 2) / 2
@@ -373,8 +424,8 @@ class ObjectDelegate(QStyledItemDelegate):
                          QFontMetrics(bold).elidedText(s.name, Qt.TextElideMode.ElideRight, name_w))
         painter.setFont(option.font)
         painter.setPen(QColor(T["muted"]))
-        unit = "object" if index.data(GroupRole) else "session"
-        sub = f"{s.files} frames · {fmt_size(s.size)} · {s.sessions} {unit}{'' if s.sessions == 1 else 's'}"
+        unit = "count.objects" if index.data(GroupRole) else "count.sessions"
+        sub = " · ".join((t("count.frames", count=s.files), fmt_size(s.size), t(unit, count=s.sessions)))
         painter.drawText(QRectF(r.left() + pad, top + fm.height() + 2, text_w, fm.height()), Qt.AlignmentFlag.AlignVCenter,
                          fm.elidedText(sub, Qt.TextElideMode.ElideRight, text_w))
         painter.restore()
@@ -393,7 +444,7 @@ class QueueDelegate(_BaseDelegate):
         color = QUEUE_STATE_COLORS.get(state, T["muted"])
         if c == 2:
             self._background(painter, option, index)
-            _dot_text(painter, option.rect, color, state, option.font, T["text"])
+            _dot_text(painter, option.rect, color, index.data() or state, option.font, T["text"])
             return
         if c == 3:
             self._background(painter, option, index)

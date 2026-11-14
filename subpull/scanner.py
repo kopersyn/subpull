@@ -19,6 +19,7 @@ from typing import Callable, Iterable, Optional
 
 from . import classify, config
 from .connection import ConnectionFailed, RemoteFS, RemotePathError, join
+from .i18n import t
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +32,13 @@ SRC_PREFIX = "prefix"
 SRC_FITS = "FITS"
 
 FITS_NOT_READ, FITS_OK, FITS_MISSING, FITS_NA = "not read", "ok", "unreadable", "n/a"
+_FITS_STATUS_KEYS = {FITS_NOT_READ: "not_read", FITS_OK: "ok", FITS_MISSING: "unreadable", FITS_NA: "na"}
+
+
+def fits_status_label(status: str) -> str:
+    """The FITS header status as shown to the user."""
+    key = _FITS_STATUS_KEYS.get(status)
+    return t(f"fits.status.{key}") if key else status
 
 
 @dataclass
@@ -62,7 +70,7 @@ class FrameFile:
         if header is None:
             self.fits_status = FITS_MISSING
             if self.object_name is None:
-                self._note("no FITS header – object unknown")
+                self._note(t("note.no_header"))
             return
         self.fits = header
         self.fits_status = FITS_OK
@@ -73,15 +81,15 @@ class FrameFile:
                 self.object_name = obj
                 self.object_source = SRC_FITS
             else:
-                self._note(f"FITS OBJECT = '{obj}' – object unknown")
+                self._note(t("note.object_placeholder", value=obj))
         elif obj_valid and not classify.same_object(obj, self.object_name):
-            self._note(f"FITS OBJECT='{obj}' ≠ directory '{self.object_name}'")
+            self._note(t("note.object_mismatch", fits=obj, directory=self.object_name))
         ftype = classify.frame_type_from_imagetyp(header.get("IMAGETYP"))
         if self.frame_type is None and ftype:
             self.frame_type = ftype
             self.type_source = SRC_FITS
         elif ftype and self.frame_type and ftype != self.frame_type:
-            self._note(f"FITS IMAGETYP={header.get('IMAGETYP')} ≠ {self.frame_type}")
+            self._note(t("note.type_mismatch", fits=header.get("IMAGETYP"), type=self.frame_type))
 
     def _note(self, msg: str) -> None:
         if msg not in self.notes:
@@ -146,7 +154,7 @@ class Scanner:
                        object_source=SRC_DIR if obj else None, type_source=type_source,
                        fits_status=FITS_NOT_READ if classify.is_fits(e.name) else FITS_NA)
         if ftype is None:
-            ff.notes.append("frame type not recognized")
+            ff.notes.append(t("note.type_unknown"))
         self.result.files.append(ff)
 
     def scan(self) -> ScanResult:
@@ -166,7 +174,7 @@ class Scanner:
             date = classify.parse_session_date(e.name)
             if date:
                 self.result.date_dirs += 1
-                self.progress(f"Session {p}")
+                self.progress(t("scan.progress.session", path=p))
                 self._date_dir(p, date)
             elif depth < self.max_search_depth:
                 self._search(p, depth + 1)
@@ -193,7 +201,7 @@ class Scanner:
                     self._type_dir(p, date, obj, ftype, SCHEME_A)
                 else:
                     self.result.unrecognized.append(
-                        Unrecognized(p + "/", f"subdirectory '{e.name}' is not a frame type – skipped"))
+                        Unrecognized(p + "/", t("unrecognized.reason.not_frame_type", name=e.name)))
             elif classify.is_frame_file(e.name):
                 ftype = classify.frame_type_from_filename(e.name)
                 self._add(p, e, date, obj, ftype, SCHEME_B, SRC_PREFIX if ftype else None)
@@ -214,7 +222,7 @@ def finalize(result: ScanResult) -> None:
         if f.object_name:
             keep.append(f)
         else:
-            reason = "; ".join(f.notes) or "no object directory and no FITS OBJECT keyword"
+            reason = "; ".join(f.notes) or t("unrecognized.reason.no_object")
             result.unrecognized.append(Unrecognized(f.remote_path, reason, f.size))
     result.files = keep
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from . import local_state
+from .i18n import number, t
 from .downloader import ACTIVE, CANCELLED, DONE, ERROR, QUEUED, SKIPPED, VERIFYING, TransferJob
 from .local_state import InvalidName, LocalStatus
 from .scanner import FrameFile, ScanResult
@@ -18,6 +19,9 @@ NEW_STATES = (LocalStatus.NEW, LocalStatus.PARTIAL)
 # Statuses the user must opt in to before they are downloaded (default: skipped).
 OPT_IN_STATES = (LocalStatus.PRESENT, LocalStatus.CONFLICT, LocalStatus.HISTORY_ONLY)
 OVERWRITE_STATES = (LocalStatus.PRESENT, LocalStatus.CONFLICT)
+# Why a selected file is not part of a download plan (identifiers, not shown to the user).
+SKIP_QUEUED = "already in the transfer queue"
+SKIP_NAME_CLASH = "name clash or invalid name"
 
 Status = tuple[LocalStatus, Optional[str]]
 
@@ -26,7 +30,7 @@ Status = tuple[LocalStatus, Optional[str]]
 def compute_statuses(files: Iterable[FrameFile], history_rows: dict, dest_root: Optional[Path]) -> dict[str, Status]:
     files = list(files)
     if dest_root is None:
-        return {f.remote_path: (LocalStatus.NEW, "destination folder not set") for f in files}
+        return {f.remote_path: (LocalStatus.NEW, t("status.detail.no_destination")) for f in files}
     clashes = local_state.name_clashes(files, dest_root)
     return {f.remote_path: local_state.local_status(f, history_rows, clashes, dest_root) for f in files}
 
@@ -155,9 +159,9 @@ def build_plan(selected: Iterable[FrameFile], statuses: dict[str, Status], dest_
         plan.counts[st] = plan.counts.get(st, 0) + 1
         row = rows.setdefault(f.object_name, PlanRow(f.object_name))
         if f.remote_path in active:
-            reason = "already in the transfer queue"
+            reason = SKIP_QUEUED
         elif st == LocalStatus.NAME_CLASH:
-            reason = "name clash or invalid name"
+            reason = SKIP_NAME_CLASH
         elif st in OPT_IN_STATES and st not in include:
             reason = st.value
         else:
@@ -258,11 +262,11 @@ class QueueStats:
 
 # --------------------------------------------------------------------------- formatting helpers
 def fmt_size(n: float) -> str:
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if abs(n) < 1024 or unit == "TB":
-            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+    for unit in ("b", "kb", "mb", "gb", "tb"):
+        if abs(n) < 1024 or unit == "tb":
+            return t(f"units.{unit}", value=f"{n:.0f}" if unit == "b" else number(n, ".1f"))
         n /= 1024
-    return f"{n:.1f} TB"
+    return t("units.tb", value=number(n, ".1f"))
 
 
 def fmt_duration(seconds: Optional[float]) -> str:
@@ -272,14 +276,25 @@ def fmt_duration(seconds: Optional[float]) -> str:
     h, rem = divmod(seconds, 3600)
     m, s = divmod(rem, 60)
     if h:
-        return f"{h} h {m:02d} min"
+        return t("duration.hours_minutes", hours=h, minutes=f"{m:02d}")
     if m:
-        return f"{m} min {s:02d} s"
-    return f"{s} s"
+        return t("duration.minutes_seconds", minutes=m, seconds=f"{s:02d}")
+    return t("duration.seconds", seconds=s)
+
+
+def fmt_speed(bytes_per_second: float) -> str:
+    return t("units.speed", size=fmt_size(bytes_per_second))
+
+
+def fmt_seconds(value: float, spec: str = "g") -> str:
+    return t("units.seconds", value=number(value, spec))
 
 
 def scan_summary(result: ScanResult, elapsed: float) -> str:
     total = sum(f.size for f in result.files)
-    return (f"{len(result.files)} frames · {len(result.objects)} objects · {result.date_dirs} sessions · "
-            f"{fmt_size(total)} · {len(result.unrecognized)} unrecognized · {elapsed:.1f} s"
-            + (" · CANCELLED" if result.cancelled else ""))
+    parts = [t("count.frames", count=len(result.files)), t("count.objects", count=len(result.objects)),
+             t("count.sessions", count=result.date_dirs), fmt_size(total),
+             t("count.unrecognized", count=len(result.unrecognized)), fmt_seconds(elapsed, ".1f")]
+    if result.cancelled:
+        parts.append(t("scan.summary.cancelled"))
+    return " · ".join(parts)

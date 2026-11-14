@@ -1,0 +1,30 @@
+name: Translation mistake
+description: Report a wrong, awkward or missing translation in SubPull
+title: "[Translation] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping to improve SubPull's translations!
+        If you know the right wording, you can also fix it yourself – see the
+        [translation guide](https://github.com/kopersyn/subpull/blob/main/translations/README.md).
+  - type: input
+    id: language
+    attributes:
+      label: Language
+      placeholder: "for example: Polski (pl)"
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Text shown in SubPull now
+      description: Copy the text, or attach a screenshot. Where in the application does it appear?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: What it should say
+    validations:
+      required: false

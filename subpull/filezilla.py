@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import config
+from .i18n import t
 
 PROTOCOLS = {0: "ftp", 1: "sftp", 3: "ftps", 4: "ftpes", 6: "insecure-ftp"}
 LOGON_NORMAL = 1
@@ -38,10 +39,10 @@ class SiteProfile:
     @property
     def auth_label(self) -> str:
         if self.logontype == LOGON_KEYFILE:
-            return f"key {Path(self.keyfile).name}" if self.keyfile else "key"
+            return t("auth.key_file", file=Path(self.keyfile).name) if self.keyfile else t("auth.key")
         if self.logontype == LOGON_NORMAL:
-            return "saved password"
-        return f"logon type {self.logontype}"
+            return t("auth.password")
+        return t("auth.logon_type", type=self.logontype)
 
     def __repr__(self) -> str:  # never leak the password into logs
         return (f"SiteProfile(name={self.name!r}, host={self.host!r}, port={self.port}, "
@@ -78,11 +79,11 @@ def _parse(server: ET.Element) -> SiteProfile:
 
 def _servers(path: Path) -> list[ET.Element]:
     if not path.exists():
-        raise ProfileError(f"{path} not found – no FileZilla Site Manager entries.")
+        raise ProfileError(t("error.site.no_sitemanager", path=path))
     try:
         return list(ET.parse(path).getroot().iter("Server"))
     except ET.ParseError as e:
-        raise ProfileError(f"Cannot parse {path}: {e}") from e
+        raise ProfileError(t("error.site.parse", path=path, error=e)) from e
 
 
 def list_sites(path: Path = config.SITEMANAGER_XML, sftp_only: bool = True) -> list[str]:
@@ -97,7 +98,7 @@ def load_site(name: str, path: Path = config.SITEMANAGER_XML) -> SiteProfile:
     for server in _servers(path):
         if _text(server, "Name") == name:
             return _parse(server)
-    raise ProfileError(f"No site named '{name}' in {path}.")
+    raise ProfileError(t("error.site.not_found", site=name, path=path))
 
 
 def load_trusted_hostkeys(host: str, port: int,

@@ -20,10 +20,12 @@ from ..connection import ConnectionFailed, SFTPConnection
 from ..downloader import CANCELLED, DONE, ERROR, FINAL_STATES, SKIPPED, DownloadManager, TransferJob
 from ..filezilla import ProfileError, SiteProfile, list_sites, load_site
 from ..history import History
+from ..i18n import t
 from ..local_state import LocalStatus
 from ..scanner import SCHEME_A0, ScanResult, Scanner, finalize, read_headers
 from ..workflow import (DownloadPlan, QueueStats, Status, build_plan, compute_statuses, fmt_size, make_jobs,
                         object_summaries, scan_summary)
+from . import language
 from .workers import TaskThread
 
 log = logging.getLogger(__name__)
@@ -45,6 +47,7 @@ class Controller(QObject):
     destinationChanged = Signal()
     headersBusy = Signal(bool)
     settingsChanged = Signal()
+    languageChanged = Signal()                  # the interface language changed – views re-apply their texts
     _dl = Signal(str, object)
 
     def __init__(self, settings: Optional[Settings] = None, history: Optional[History] = None, parent=None):
@@ -55,7 +58,7 @@ class Controller(QObject):
         self.conn: Optional[SFTPConnection] = None
         self.profile: Optional[SiteProfile] = None
         self.profile_error: Optional[str] = None
-        self.conn_state: tuple[str, str] = ("idle", "")
+        self._conn: tuple = ("idle", "", None, {})  # state, literal text, translation key, parameters
         self.result: Optional[ScanResult] = None
         self.scan_elapsed = 0.0
         self.statuses: dict[str, Status] = {}
@@ -89,7 +92,7 @@ class Controller(QObject):
         self.conn, self.profile, self.profile_error = None, None, None
         try:
             if not name:
-                raise ProfileError("No SFTP site in FileZilla Site Manager – create one there first.")
+                raise ProfileError(t("error.site.none"))
             self.profile = load_site(name)
             self.conn = SFTPConnection(self.profile)
             log.info("Using FileZilla site '%s': %s (%s)", name, self.conn.label, self.profile.auth_label)
@@ -101,12 +104,32 @@ class Controller(QObject):
 
     def _require_conn(self):
         if self.conn is None:
-            raise ConnectionFailed(self.profile_error or "No site profile")
+            raise ConnectionFailed(self.profile_error or t("error.site.no_profile"))
         return self.conn
 
-    def _set_conn(self, state: str, text: str = "") -> None:
-        self.conn_state = (state, text)
-        self.connectionState.emit(state, text)
+    def _set_conn(self, state: str, text: str = "", key: Optional[str] = None, **params) -> None:
+        """Connection state with either a literal ``text`` or a translation ``key`` (re-rendered
+        when the language changes)."""
+        self._conn = (state, text, key, params)
+        self.connectionState.emit(*self.conn_state)
+
+    @property
+    def conn_state(self) -> tuple[str, str]:
+        state, text, key, params = self._conn
+        return state, (t(key, **params) if key else text)
+
+    def set_language(self, code: str) -> None:
+        """Switch the interface language at runtime ("auto" = system language) and remember it."""
+        if code != self.settings.language:
+            self.settings.language = code
+            self.settings.save()
+        self.apply_language()
+
+    def apply_language(self) -> None:
+        language.apply(self.settings.language)
+        self.recompute_statuses(emit=False)      # status details are texts too
+        self.languageChanged.emit()
+        self.connectionState.emit(*self.conn_state)
 
     @property
     def dest_root(self) -> Optional[Path]:
@@ -148,10 +171,10 @@ class Controller(QObject):
     def test_connection(self) -> None:
         conn = self.conn
         if conn is None:
-            self._fail(ConnectionFailed(self.profile_error or "No site profile"), None)
+            self._fail(ConnectionFailed(self.profile_error or t("error.site.no_profile")), None)
             return
         src = self.settings.source_dir or "/"
-        self._set_conn("busy", "Connecting…")
+        self._set_conn("busy", key="connection.busy")
 
         def work(progress):
             t0 = time.time()
@@ -162,7 +185,7 @@ class Controller(QObject):
                 fs.close()
             return time.time() - t0
 
-        self._run(work, lambda dt: self._set_conn("ok", f"Connected · {dt * 1000:.0f} ms"),
+        self._run(work, lambda dt: self._set_conn("ok", key="connection.connected_ping", ms=f"{dt * 1000:.0f}"),
                   lambda e: self._fail(e, self.test_connection))
 
     # ================================================================== scanning
@@ -175,7 +198,7 @@ class Controller(QObject):
             return
         conn = self.conn
         if conn is None:
-            self._fail(ConnectionFailed(self.profile_error or "No site profile"), None)
+            self._fail(ConnectionFailed(self.profile_error or t("error.site.no_profile")), None)
             return
         src = (source_dir if source_dir is not None else self.settings.source_dir).strip() or "/"
         if src != self.settings.source_dir:
@@ -186,12 +209,12 @@ class Controller(QObject):
         cancel.clear()
         self._scanning = True
         self.scanRunning.emit(True)
-        self._set_conn("busy", f"Connecting to {conn.label}…")
+        self._set_conn("busy", key="connection.connecting_to", server=conn.label)
 
         def work(progress):
             t0 = time.time()
-            fs = conn.connect_with_retry(cancel=cancel, on_retry=lambda n, e: progress(f"Retrying connection ({n})…"))
-            self.connectionState.emit("ok", f"Connected · scanning {src}")
+            fs = conn.connect_with_retry(cancel=cancel, on_retry=lambda n, e: progress(t("connection.retrying", attempt=n)))
+            self.connectionState.emit("ok", t("connection.connected_scanning", folder=src))
             try:
                 res = Scanner(fs, src, progress=progress, cancel=cancel).scan()
             finally:
@@ -199,10 +222,10 @@ class Controller(QObject):
             if not res.cancelled:
                 targets = [f for f in res.files if read_all or f.scheme == SCHEME_A0]
                 if targets:
-                    progress(f"Reading FITS headers 0/{len(targets)}")
+                    progress(t("scan.progress.headers", done=0, total=len(targets)))
                     read_headers(targets, conn.connect_with_retry, cancel=cancel, placeholders=placeholders,
-                                 progress=lambda n, t: progress(f"Reading FITS headers {n}/{t}")
-                                 if n % 10 == 0 or n == t else None)
+                                 progress=lambda n, total: progress(t("scan.progress.headers", done=n, total=total))
+                                 if n % 10 == 0 or n == total else None)
             finalize(res)
             res.finished = time.time()
             return res, time.time() - t0
@@ -211,7 +234,7 @@ class Controller(QObject):
             res, elapsed = payload
             self._scanning = False
             self.scanRunning.emit(False)
-            self._set_conn("ok", f"Connected · scan finished {time.strftime('%H:%M')}")
+            self._set_conn("ok", key="connection.connected_scan_finished", time=time.strftime("%H:%M"))
             self._apply_scan(res, elapsed)
 
         def fail(e):
@@ -263,7 +286,7 @@ class Controller(QObject):
 
         def work(progress):
             return read_headers(targets, conn.connect_with_retry, placeholders=placeholders,
-                                progress=lambda a, b: progress(f"Reading FITS headers {a}/{b}"))
+                                progress=lambda a, b: progress(t("scan.progress.headers", done=a, total=b)))
 
         def ok(n):
             self.headersBusy.emit(False)
@@ -314,7 +337,7 @@ class Controller(QObject):
             self.jobs[j.id] = j
             self.batch_ids.add(j.id)
         total = sum(j.total for j in jobs)
-        self.history.log_operation("download", f"queued {len(jobs)} files · {fmt_size(total)}")
+        self.history.log_operation("download", t("history.summary.queued", count=len(jobs), size=fmt_size(total)))
         log.info("Download started: %d files (%s)", len(jobs), fmt_size(total))
         self.manager.submit(jobs)
         self.historyChanged.emit()
@@ -357,8 +380,8 @@ class Controller(QObject):
         if kind == "idle":
             batch = [self.jobs[i] for i in self.batch_ids if i in self.jobs]
             count = lambda s: sum(1 for j in batch if j.state == s)
-            msg = (f"finished: {count(DONE)} downloaded, {count(SKIPPED)} skipped, "
-                   f"{count(CANCELLED)} cancelled, {count(ERROR)} errors")
+            msg = t("history.summary.finished", done=count(DONE), skipped=count(SKIPPED),
+                    cancelled=count(CANCELLED), errors=count(ERROR))
             self.history.log_operation("download", msg)
             log.info("Download %s", msg)
             self.queueIdle.emit()
@@ -384,6 +407,6 @@ class Controller(QObject):
         if self.manager.running:
             self.manager.cancel_all()
             self.manager.wait(wait)
-        for t in list(self._threads):
-            t.wait(int(wait * 1000))
+        for th in list(self._threads):
+            th.wait(int(wait * 1000))
         self.history.close()

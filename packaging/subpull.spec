@@ -9,6 +9,7 @@ a = Analysis(
     [str(ROOT / "packaging" / "launcher.py")],
     pathex=[str(ROOT)],
     datas=[(str(ROOT / "subpull" / "ui" / "assets"), "subpull/ui/assets"),
+           (str(ROOT / "subpull" / "i18n" / "locales"), "subpull/i18n/locales"),
            (str(ROOT / "LICENSE"), ".")],
     hiddenimports=["PySide6.QtSvg"],
     excludes=["tkinter", "unittest", "pydoc", "PySide6.QtNetwork", "PySide6.QtQml", "PySide6.QtQuick",

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from . import config
+from .i18n import t
 from .connection import AuthFailed, ConnectionFailed, HostKeyError, RemoteFS, RemotePathError, is_network_error
 from .history import History
 from .local_state import part_path
@@ -54,6 +55,15 @@ class TransferJob:
 
     def __post_init__(self):
         self.total = self.total or self.file.size
+
+
+_VERIFIED_KEYS = {"size": "verified.size", "size + server sha256": "verified.size_sha256"}
+
+
+def verified_label(method: Optional[str]) -> str:
+    """How a download was verified, as shown to the user (the stored value is a stable identifier)."""
+    key = _VERIFIED_KEYS.get(method or "")
+    return t(key) if key else (method or "")
 
 
 class _Cancel(Exception):
@@ -108,8 +118,8 @@ class DownloadManager:
 
     def wait(self, timeout: Optional[float] = None) -> None:
         end = None if timeout is None else time.time() + timeout
-        for t in list(self._threads):
-            t.join(None if end is None else max(0, end - time.time()))
+        for th in list(self._threads):
+            th.join(None if end is None else max(0, end - time.time()))
 
     # ------------------------------------------------------------------ internals
     def _emit(self, job: TransferJob) -> None:
@@ -127,7 +137,7 @@ class DownloadManager:
                 except queue.Empty:
                     break
                 if self._cancelled(job) or self._fatal is not None:
-                    job.state, job.message = CANCELLED, (str(self._fatal) if self._fatal else "cancelled before start")
+                    job.state, job.message = CANCELLED, (str(self._fatal) if self._fatal else t("transfer.message.cancelled_before_start"))
                     self._emit(job)
                     continue
                 fs = self._run_job(job, fs)
@@ -154,7 +164,8 @@ class DownloadManager:
                 return fs
             except _Cancel:
                 job.state, job.speed = CANCELLED, 0
-                job.message = "cancelled – .subpull-part kept for resume" if job.done else "cancelled"
+                job.message = (t("transfer.message.cancelled_partial", suffix=config.PART_SUFFIX) if job.done
+                               else t("transfer.message.cancelled"))
                 self._emit(job)
                 return fs
             except (AuthFailed, HostKeyError) as e:
@@ -171,7 +182,7 @@ class DownloadManager:
                     delay = self.backoff[min(attempt, len(self.backoff) - 1)]
                     attempt += 1
                     log.warning("%s: %s – retry %d/%d in %ss", job.file.name, e, attempt, self.retries, delay)
-                    job.state, job.message, job.speed = QUEUED, f"connection lost, retry {attempt}/{self.retries}…", 0
+                    job.state, job.message, job.speed = QUEUED, t("transfer.message.retry", attempt=attempt, total=self.retries), 0
                     self._emit(job)
                     if fs is not None:
                         try:
@@ -197,7 +208,7 @@ class DownloadManager:
             raise _Cancel()
 
         if dest.exists() and not job.overwrite:
-            job.state, job.message = SKIPPED, "already exists locally – not overwritten"
+            job.state, job.message = SKIPPED, t("transfer.message.exists")
             self._emit(job)
             return
 
@@ -219,7 +230,7 @@ class DownloadManager:
         self.history.set_partial(str(part), f.remote_path, size, mtime)
         job.resumed_from = offset
         job.done = offset
-        job.state, job.message = ACTIVE, (f"resumed at {offset} B" if offset else "")
+        job.state, job.message = ACTIVE, (t("transfer.message.resumed", offset=offset) if offset else "")
         self._emit(job)
 
         hasher = hashlib.sha256() if offset == 0 else None
@@ -235,7 +246,7 @@ class DownloadManager:
                         raise _Cancel()
                     chunk = rf.read(min(config.CHUNK_SIZE, size - job.done))
                     if not chunk:
-                        raise ConnectionFailed("Server stopped sending before the end of the file")
+                        raise ConnectionFailed(t("error.download.truncated"))
                     out.write(chunk)
                     if hasher:
                         hasher.update(chunk)
@@ -260,12 +271,12 @@ class DownloadManager:
         self._emit(job)
         local_size = part.stat().st_size
         if local_size != size:
-            raise ConnectionFailed(f"Size mismatch after download ({local_size} ≠ {size})")
+            raise ConnectionFailed(t("error.download.size_mismatch", local=local_size, remote=size))
         st2 = fs.stat(f.remote_path)
         if (st2.size, st2.mtime) != (size, mtime):
             part.unlink(missing_ok=True)
             self.history.clear_partial(str(part))
-            raise RemotePathError("The server file changed during download – download it again")
+            raise RemotePathError(t("error.download.changed"))
         if hasher is None:
             hasher = hashlib.sha256()
             with open(part, "rb") as fh:
@@ -279,13 +290,13 @@ class DownloadManager:
             if algo == "sha256" and digest.lower() != local_sha:
                 part.unlink(missing_ok=True)
                 self.history.clear_partial(str(part))
-                raise RemotePathError("SHA-256 does not match the server – partial file removed, download again")
+                raise RemotePathError(t("error.download.sha_mismatch"))
             verified = "size + server sha256"
 
         # --- finalize (never a silent overwrite) ------------------------------------
         if dest.exists():
             if not job.overwrite:
-                job.state, job.message = SKIPPED, "file appeared locally meanwhile – .subpull-part kept"
+                job.state, job.message = SKIPPED, t("transfer.message.appeared", suffix=config.PART_SUFFIX)
                 self._emit(job)
                 return
             os.replace(part, dest)
@@ -301,5 +312,6 @@ class DownloadManager:
             remote_path=f.remote_path, local_path=str(dest), size=size, remote_mtime=mtime,
             sha256=local_sha, verified=verified)
         job.state, job.verified, job.finished_at = DONE, verified, time.time()
-        job.message = ("overwritten with your consent; " if job.overwrite else "") + f"verified: {verified}"
+        job.message = t("transfer.message.overwritten" if job.overwrite else "transfer.message.verified",
+                        method=verified_label(verified))
         self._emit(job)

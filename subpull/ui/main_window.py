@@ -7,9 +7,10 @@ from PySide6.QtWidgets import (QButtonGroup, QFileDialog, QFrame, QLineEdit, QMa
                                QSizePolicy, QStackedWidget, QToolButton, QWidget)
 
 from .. import config
+from ..i18n import t
 from . import icons
 from .controller import Controller
-from .dialogs import ConfirmDownloadDialog, UnrecognizedDialog, show_error
+from .dialogs import ConfirmDownloadDialog, UnrecognizedDialog, message, show_error
 from .history_view import HistoryPage
 from .library import LibraryPage
 from .logs_view import LogsPage
@@ -20,8 +21,9 @@ from .theme import T
 from .widgets import StatusDot, button, hbox, label, vbox
 
 CONN_COLORS = dict(idle=T["muted"], busy=T["warning"], ok=T["success"], error=T["danger"])
-PAGES = [("library", "Library", "library"), ("queue", "Transfers", "queue"), ("history", "History", "history"),
-         ("logs", "Activity log", "logs"), ("settings", "Settings", "settings")]
+# (page id, translation key of its name, icon)
+PAGES = [("library", "nav.library", "library"), ("queue", "nav.queue", "queue"), ("history", "nav.history", "history"),
+         ("logs", "nav.logs", "logs"), ("settings", "nav.settings", "settings")]
 
 
 class Sidebar(QFrame):
@@ -34,29 +36,28 @@ class Sidebar(QFrame):
         self.logo.setIcon(icons.logo_icon())
         self.logo.setIconSize(QSize(int(fm.height() * 1.7), int(fm.height() * 1.7)))
         self.logo.setEnabled(True)
-        self.logo.setToolTip("SubPull")
-        self.brand = label("SubPull", "BrandName")
+        self.logo.setToolTip(config.APP_NAME)
+        self.brand = label(config.APP_NAME, "BrandName")
         brand_row = hbox(self.logo, self.brand, None, spacing=4)
 
         self.group = QButtonGroup(self)
         self.group.setExclusive(True)
         self.buttons: dict[str, QToolButton] = {}
         nav = vbox(spacing=2)
-        for i, (key, text, ic) in enumerate(PAGES):
+        for key, _, ic in PAGES:
             b = QToolButton()
-            b.setText(text)
             b.setIcon(icons.icon(ic, T["muted"], T["text"]))
             b.setIconSize(QSize(int(fm.height() * 1.15), int(fm.height() * 1.15)))
             b.setCheckable(True)
             b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setToolTip(f"{text}  (Ctrl+{i + 1})")
             b.clicked.connect(lambda _=False, k=key: on_select(k))
             self.group.addButton(b)
             self.buttons[key] = b
             nav.addWidget(b)
-        self._labels = {k: t for k, t, _ in PAGES}
+        self._badges: dict[str, str] = {}
+        self._conn: tuple[str, str] = ("idle", "")
 
         self.dot = StatusDot()
         self.conn_label = label("", "SidebarFooter")
@@ -64,13 +65,25 @@ class Sidebar(QFrame):
         self.collapse = QToolButton()
         self.collapse.setObjectName("Ghost")
         self.collapse.setIcon(icons.icon("sidebar", T["muted"]))
-        self.collapse.setToolTip("Collapse sidebar")
         self.collapse.clicked.connect(lambda: self.set_collapsed(not self.collapsed))
         self.footer = hbox(self.dot, self.conn_label, None, spacing=8)
         self.setLayout(vbox(brand_row, 14, nav, None, self.footer, 6, hbox(self.collapse, None),
                             spacing=4, margins=(10, 12, 10, 10)))
-        self.collapsed = False
-        self.set_collapsed(qs.value("sidebar/collapsed", False, type=bool))
+        self.collapsed = qs.value("sidebar/collapsed", False, type=bool)
+        self.retranslate()
+
+    def retranslate(self) -> None:
+        for i, (key, text_key, _) in enumerate(PAGES):
+            self.buttons[key].setToolTip(t("nav.tooltip", page=t(text_key), shortcut=f"Ctrl+{i + 1}"))
+            self.set_badge(key, self._badges.get(key, ""))
+        self.set_collapsed(self.collapsed)
+        self.set_connection(*self._conn)
+
+    def _expanded_width(self) -> int:
+        """Wide enough for the longest page name in the current language (plus icon, padding and a badge)."""
+        fm = self.fontMetrics()
+        longest = max(fm.horizontalAdvance(t(text_key)) for _, text_key, _ in PAGES)
+        return max(fm.averageCharWidth() * 27, longest + int(fm.height() * 1.15) + fm.averageCharWidth() * 9)
 
     def set_collapsed(self, collapsed: bool) -> None:
         self.collapsed = collapsed
@@ -80,21 +93,21 @@ class Sidebar(QFrame):
             b.setToolButtonStyle(style)
         self.brand.setVisible(not collapsed)
         self.conn_label.setVisible(not collapsed)
-        self.collapse.setToolTip("Expand sidebar" if collapsed else "Collapse sidebar")
-        cw = self.fontMetrics().averageCharWidth()
-        self.setFixedWidth(int(self.fontMetrics().height() * 3.6) if collapsed else cw * 27)
+        self.collapse.setToolTip(t("nav.expand" if collapsed else "nav.collapse"))
+        self.setFixedWidth(int(self.fontMetrics().height() * 3.6) if collapsed else self._expanded_width())
 
     def set_active(self, key: str) -> None:
         self.buttons[key].setChecked(True)
 
     def set_badge(self, key: str, text: str) -> None:
-        b = self.buttons[key]
-        b.setText(f"{self._labels[key]}   {text}" if text else self._labels[key])
+        self._badges[key] = text
+        name = t(next(text_key for k, text_key, _ in PAGES if k == key))
+        self.buttons[key].setText(f"{name}   {text}" if text else name)
 
     def set_connection(self, state: str, text: str) -> None:
+        self._conn = (state, text)
         self.dot.set_color(CONN_COLORS.get(state, T["muted"]))
-        text = text or {"idle": "Not connected", "busy": "Connecting…", "ok": "Connected",
-                        "error": "Connection error"}.get(state, "")
+        text = text or (t(f"connection.{state}") if state in CONN_COLORS else "")
         self.dot.setToolTip(text)
         self.conn_label.setText(text)
 
@@ -123,14 +136,13 @@ class TopBar(QFrame):
         self.conn.setMaximumWidth(fm.averageCharWidth() * 46)
 
         self.source = QLineEdit()
-        self.source.setPlaceholderText("Remote folder")
         self.source.addAction(icons.icon("folder", T["muted"]), QLineEdit.ActionPosition.LeadingPosition)
-        self.source.setToolTip("Remote folder to scan (session folders are searched up to 4 levels below it)")
         self.source.setFixedWidth(fm.averageCharWidth() * 24)
         self.source.returnPressed.connect(win.scan)
         self.source.editingFinished.connect(lambda: ctl.update_settings(source_dir=self.source.text().strip() or "/"))
 
-        self.scan_btn = button("Scan", "scan", "Primary", "Scan the remote folder (F5). Nothing is downloaded.", win.scan_or_cancel)
+        self.scan_btn = button("", "scan", "Primary", slot=win.scan_or_cancel)
+        self._scanning = False
         self.scan_info = label("", "Muted")
 
         self.dest = QToolButton()
@@ -140,8 +152,8 @@ class TopBar(QFrame):
         self.dest.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.dest.setCursor(Qt.CursorShape.PointingHandCursor)
         dm = QMenu(self)
-        dm.addAction(icons.icon("folder"), "Change destination…", win.choose_destination)
-        self.open_dest = dm.addAction(icons.icon("open"), "Open in file manager", win.open_destination)
+        self.change_dest = dm.addAction(icons.icon("folder"), "", win.choose_destination)
+        self.open_dest = dm.addAction(icons.icon("open"), "", win.open_destination)
         self.dest.setMenu(dm)
 
         self.setLayout(hbox(self.site, self.dot, self.conn, None, self.scan_info, self.source, self.scan_btn, 12,
@@ -153,6 +165,15 @@ class TopBar(QFrame):
         ctl.connectionState.connect(self.set_connection)
         ctl.scanRunning.connect(self.set_scanning)
         ctl.scanProgress.connect(self.scan_info.setText)
+        self.retranslate()
+
+    def retranslate(self) -> None:
+        self.source.setPlaceholderText(t("topbar.source.placeholder"))
+        self.source.setToolTip(t("topbar.source.tooltip"))
+        self.scan_btn.setToolTip(t("topbar.scan.tooltip"))
+        self.scan_btn.setText(t("actions.cancel" if self._scanning else "actions.scan"))
+        self.change_dest.setText(t("topbar.destination.change"))
+        self.open_dest.setText(t("topbar.destination.open"))
         self.refresh()
 
     def _fill_site_menu(self) -> None:
@@ -167,40 +188,41 @@ class TopBar(QFrame):
             a.triggered.connect(lambda _=False, n=name: ctl.select_site(n))
             grp.addAction(a)
         if not ctl.sites:
-            m.addAction("No SFTP sites in FileZilla").setEnabled(False)
+            m.addAction(t("topbar.site.no_sites")).setEnabled(False)
         m.addSeparator()
-        m.addAction(icons.icon("retry"), "Reload FileZilla sites", ctl.reload_sites)
-        m.addAction(icons.icon("server"), "Test connection", ctl.test_connection)
-        m.addAction(icons.icon("settings"), "Connection settings…", lambda: self.win.show_page("settings"))
+        m.addAction(icons.icon("retry"), t("topbar.site.reload"), ctl.reload_sites)
+        m.addAction(icons.icon("server"), t("actions.test_connection"), ctl.test_connection)
+        m.addAction(icons.icon("settings"), t("topbar.site.settings"), lambda: self.win.show_page("settings"))
 
     def refresh(self) -> None:
         ctl = self.win.ctl
         fm = self.fontMetrics()
         if ctl.conn:
             text = f"{ctl.settings.profile_name}  ·  {ctl.conn.label}"
-            self.site.setToolTip(f"FileZilla site '{ctl.settings.profile_name}'\n{ctl.conn.label}\n{ctl.profile.auth_label}")
+            self.site.setToolTip("\n".join((t("topbar.site.tooltip", site=ctl.settings.profile_name), ctl.conn.label,
+                                            ctl.profile.auth_label)))
         else:
-            text = "No site"
+            text = t("topbar.site.none")
             self.site.setToolTip(ctl.profile_error or "")
         self.site.setText(fm.elidedText(text, Qt.TextElideMode.ElideMiddle, fm.averageCharWidth() * 40))
         if not self.source.hasFocus():
             self.source.setText(ctl.settings.source_dir)
         d = ctl.dest_root
         self.dest.setText(fm.elidedText(str(d), Qt.TextElideMode.ElideMiddle, fm.averageCharWidth() * 34)
-                          if d else "Choose destination…")
-        self.dest.setToolTip(f"Frames are saved to {d}/<OBJECT>/subs/" if d else "No destination folder set")
+                          if d else t("topbar.destination.choose"))
+        self.dest.setToolTip(t("topbar.destination.tooltip", folder=d) if d else t("topbar.destination.none"))
         self.open_dest.setEnabled(bool(d))
         self.set_connection(*ctl.conn_state)
 
     def set_connection(self, state: str, text: str) -> None:
         self.dot.set_color(CONN_COLORS.get(state, T["muted"]))
-        default = {"idle": "Not connected", "busy": "Connecting…", "ok": "Connected", "error": "Connection error"}[state]
-        full = text or default
+        full = text or t(f"connection.{state}")
         self.conn.setText(self.fontMetrics().elidedText(full, Qt.TextElideMode.ElideRight, self.conn.maximumWidth()))
         self.conn.setToolTip(full)
 
     def set_scanning(self, running: bool) -> None:
-        self.scan_btn.setText("Cancel" if running else "Scan")
+        self._scanning = running
+        self.scan_btn.setText(t("actions.cancel" if running else "actions.scan"))
         self.scan_btn.setObjectName("" if running else "Primary")
         self.scan_btn.setIcon(icons.icon("stop" if running else "scan", T["text2"] if running else "#ffffff"))
         self.scan_btn.style().unpolish(self.scan_btn)
@@ -246,6 +268,7 @@ class MainWindow(QMainWindow):
         self.library.chooseDestination.connect(self.choose_destination)
         self.library.scanRequested.connect(self.scan)
         ctl.errorRaised.connect(lambda e, retry: show_error(self, e, retry))
+        ctl.languageChanged.connect(self.retranslate)
         ctl.connectionState.connect(self.sidebar.set_connection)
         ctl.jobUpdated.connect(lambda _: self._update_badges())
         ctl.queueIdle.connect(self._update_badges)
@@ -263,6 +286,14 @@ class MainWindow(QMainWindow):
         else:
             self.resize(fm.averageCharWidth() * 210, fm.height() * 52)
         self.sidebar.set_connection(*ctl.conn_state)
+
+    def retranslate(self) -> None:
+        """Re-apply every text in the selected language to the existing widgets."""
+        self.sidebar.retranslate()
+        self.topbar.retranslate()
+        for page in self.pages.values():
+            page.retranslate()
+        self._update_badges()
 
     # ------------------------------------------------------------------ navigation
     def show_page(self, key: str) -> None:
@@ -292,7 +323,7 @@ class MainWindow(QMainWindow):
 
     def choose_destination(self) -> bool:
         start = str(self.ctl.dest_root) if self.ctl.dest_root and self.ctl.dest_root.exists() else str(config.Path.home())
-        d = QFileDialog.getExistingDirectory(self, "Choose destination folder (frames go to <folder>/<OBJECT>/subs)", start)
+        d = QFileDialog.getExistingDirectory(self, t("dialog.destination.title"), start)
         if not d:
             return False
         self.ctl.set_destination(d)
@@ -310,8 +341,8 @@ class MainWindow(QMainWindow):
         if not self.ctl.selected:
             return
         if self.ctl.dest_root is None:
-            QMessageBox.information(self, "Destination folder", "Choose where frames should be saved first.\n"
-                                                               "They go to <folder>/<OBJECT>/subs/.")
+            message(self, QMessageBox.Icon.Information, t("dialog.destination_required.title"),
+                    t("dialog.destination_required.text"))
             if not self.choose_destination():
                 return
         dlg = ConfirmDownloadDialog(self.ctl, self)
@@ -322,9 +353,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ shutdown
     def closeEvent(self, ev):
         if self.ctl.downloading:
-            r = QMessageBox.question(self, "Quit SubPull", "Downloads are running. Stop them and quit?\n"
-                                                           "Partial files are kept so the downloads can resume.")
-            if r != QMessageBox.StandardButton.Yes:
+            if message(self, QMessageBox.Icon.Question, t("dialog.quit.title"), t("dialog.quit.text"),
+                       ("yes", "no"), default="no") != "yes":
                 ev.ignore()
                 return
         self.qs.setValue("window/geometry", self.saveGeometry())

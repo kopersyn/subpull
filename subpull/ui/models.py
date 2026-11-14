@@ -10,11 +10,12 @@ from PySide6.QtCore import (QAbstractItemModel, QAbstractListModel, QAbstractTab
                             QSortFilterProxyModel, Qt, Signal)
 from PySide6.QtGui import QColor, QFont
 
-from ..downloader import TransferJob
-from ..local_state import LocalStatus
+from ..downloader import TransferJob, verified_label
+from ..i18n import t
+from ..local_state import LocalStatus, status_label
 from ..scanner import FrameFile
-from ..workflow import (TYPE_ORDER, UNKNOWN_TYPE, ObjectSummary, Status, exposure_seconds, fmt_size,
-                        group_files, is_new)
+from ..workflow import (TYPE_ORDER, UNKNOWN_TYPE, ObjectSummary, Status, exposure_seconds, fmt_seconds, fmt_size,
+                        fmt_speed, group_files, is_new)
 from .theme import T
 
 USER = Qt.ItemDataRole.UserRole
@@ -43,9 +44,10 @@ class FrameTreeModel(QAbstractItemModel):
     """Two-level tree: groups (object / session / type) → frame files. Column 0 is checkable;
     group rows are tri-state. Selection lives in a shared ``set`` of remote paths."""
 
-    COLUMNS = [("name", "File"), ("type", "Type"), ("filter", "Filter"), ("exposure", "Exposure"),
-               ("size", "Size"), ("session", "Session"), ("object", "Object"), ("local", "Local"),
-               ("notes", "Notes")]
+    # (column id, translation key of the header)
+    COLUMNS = [("name", "column.file"), ("type", "column.type"), ("filter", "column.filter"),
+               ("exposure", "column.exposure"), ("size", "column.size"), ("session", "column.session"),
+               ("object", "column.object"), ("local", "column.local"), ("notes", "column.notes")]
     COL = {key: i for i, (key, _) in enumerate(COLUMNS)}
 
     selectionChanged = Signal()
@@ -137,7 +139,7 @@ class FrameTreeModel(QAbstractItemModel):
 
     def headerData(self, section, orientation, role=DISPLAY):
         if orientation == Qt.Orientation.Horizontal and role == DISPLAY:
-            return self.COLUMNS[section][1]
+            return t(self.COLUMNS[section][1])
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.TextAlignmentRole:
             if self.COLUMNS[section][0] in ("size", "exposure"):
                 return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -219,7 +221,7 @@ class FrameTreeModel(QAbstractItemModel):
             return f.filter or ""
         if col == "exposure":
             e = exposure_seconds(f)
-            return "" if e is None else (f"{e:.0f} s" if e >= 10 else f"{e:g} s")
+            return "" if e is None else fmt_seconds(e, ".0f" if e >= 10 else "g")
         if col == "size":
             return fmt_size(f.size)
         if col == "session":
@@ -227,13 +229,13 @@ class FrameTreeModel(QAbstractItemModel):
         if col == "object":
             return f.object_name
         if col == "local":
-            return status[0].value
+            return status_label(status[0])
         if col == "notes":
             notes = list(f.notes)
             if f.object_source == "FITS":
-                notes.insert(0, "object from FITS header")
+                notes.insert(0, t("note.object_from_fits"))
             if f.type_source == "FITS":
-                notes.insert(0, "type from FITS header")
+                notes.insert(0, t("note.type_from_fits"))
             return " · ".join(notes)
         return None
 
@@ -248,7 +250,7 @@ class FrameTreeModel(QAbstractItemModel):
 
     @staticmethod
     def _tooltip(f: FrameFile, status: Status) -> str:
-        lines = [f.remote_path, f"Local: {status[0].value}" + (f" – {status[1]}" if status[1] else "")]
+        lines = [f.remote_path, f"{t('column.local')}: {status_label(status[0])}" + (f" – {status[1]}" if status[1] else "")]
         lines += f.notes
         return "\n".join(lines)
 
@@ -319,7 +321,7 @@ class ObjectListModel(QAbstractListModel):
 
     def set_summaries(self, summaries: list[ObjectSummary]) -> None:
         self.beginResetModel()
-        self._total = ObjectSummary("All objects", sum(s.files for s in summaries), sum(s.new for s in summaries),
+        self._total = ObjectSummary(t("library.objects.all"), sum(s.files for s in summaries), sum(s.new for s in summaries),
                                     sum(s.size for s in summaries), len(summaries), {}) if summaries else None
         self._rows = ([None] + list(summaries)) if summaries else []
         self.endResetModel()
@@ -351,13 +353,15 @@ class ObjectListModel(QAbstractListModel):
             return s is None
         if role == Qt.ItemDataRole.ToolTipRole and s is not None:
             types = ", ".join(f"{k} {v}" for k, v in sorted(s.types.items(), key=lambda kv: TYPE_ORDER.get(kv[0], 9)))
-            return f"{s.name}\n{s.files} frames · {s.sessions} sessions · {fmt_size(s.size)}\n{types}"
+            counts = " · ".join((t("count.frames", count=s.files), t("count.sessions", count=s.sessions), fmt_size(s.size)))
+            return f"{s.name}\n{counts}\n{types}"
         return None
 
 
 # =========================================================================== transfer queue
 class QueueModel(QAbstractTableModel):
-    COLUMNS = ["File", "Object", "Status", "Progress", "Speed", "Size", "Info"]
+    COLUMNS = ["column.file", "column.object", "column.status", "column.progress", "column.speed", "column.size",
+               "column.info"]
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -398,7 +402,7 @@ class QueueModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role=DISPLAY):
         if orientation == Qt.Orientation.Horizontal and role == DISPLAY:
-            return self.COLUMNS[section]
+            return t(self.COLUMNS[section])
         return None
 
     def data(self, index, role=DISPLAY):
@@ -411,8 +415,8 @@ class QueueModel(QAbstractTableModel):
         if role == StateRole:
             return j.state
         if role == DISPLAY:
-            return [j.file.name, j.file.object_name, j.state, "",
-                    f"{fmt_size(j.speed)}/s" if j.state == "downloading" and j.speed else "",
+            return [j.file.name, j.file.object_name, t(f"transfer.state.{j.state}"), "",
+                    fmt_speed(j.speed) if j.state == "downloading" and j.speed else "",
                     fmt_size(j.total), j.message][c]
         if role == Qt.ItemDataRole.ForegroundRole and c in (1, 4, 5, 6):
             return QColor(T["text2"] if c != 6 else T["muted"])
@@ -425,7 +429,8 @@ class QueueModel(QAbstractTableModel):
 
 # =========================================================================== history
 class HistoryModel(QAbstractTableModel):
-    COLUMNS = ["Downloaded", "Object", "File", "Type", "Size", "Session", "Verified", "Local path"]
+    COLUMNS = ["column.downloaded", "column.object", "column.file", "column.type", "column.size", "column.session",
+               "column.verified", "column.local_path"]
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -447,7 +452,7 @@ class HistoryModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role=DISPLAY):
         if orientation == Qt.Orientation.Horizontal and role == DISPLAY:
-            return self.COLUMNS[section]
+            return t(self.COLUMNS[section])
         return None
 
     def data(self, index, role=DISPLAY):
@@ -458,7 +463,7 @@ class HistoryModel(QAbstractTableModel):
         if role == DISPLAY:
             return [datetime.fromtimestamp(r["downloaded_at"]).strftime("%Y-%m-%d %H:%M"), r["object"], r["filename"],
                     r["frame_type"] or UNKNOWN_TYPE, fmt_size(r["size"] or 0), r["session_date"] or "",
-                    r["verified"] or "", r["local_path"]][c]
+                    verified_label(r["verified"]), r["local_path"]][c]
         if role == SortRole:
             return [r["downloaded_at"], r["object"].lower(), r["filename"].lower(), r["frame_type"] or "",
                     r["size"] or 0, r["session_date"] or "", r["verified"] or "", r["local_path"]][c]
@@ -475,7 +480,8 @@ class HistoryModel(QAbstractTableModel):
 
 class OperationsModel(QAbstractTableModel):
     """Scan / download batch summaries and transfer errors from the history database."""
-    COLUMNS = ["Time", "Event", "Summary"]
+    COLUMNS = ["column.time", "column.event", "column.summary"]
+    KINDS = ("scan", "download", "error")
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -494,7 +500,7 @@ class OperationsModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role=DISPLAY):
         if orientation == Qt.Orientation.Horizontal and role == DISPLAY:
-            return self.COLUMNS[section]
+            return t(self.COLUMNS[section])
         return None
 
     def data(self, index, role=DISPLAY):
@@ -502,7 +508,8 @@ class OperationsModel(QAbstractTableModel):
             return None
         r = self._rows[index.row()]
         if role == DISPLAY:
-            return [datetime.fromtimestamp(r["ts"]).strftime("%Y-%m-%d %H:%M"), r["kind"], r["summary"]][index.column()]
+            kind = t(f"history.event.{r['kind']}") if r["kind"] in self.KINDS else r["kind"]
+            return [datetime.fromtimestamp(r["ts"]).strftime("%Y-%m-%d %H:%M"), kind, r["summary"]][index.column()]
         if role == LevelRole:
             return logging.ERROR if r["kind"] == "error" else logging.INFO
         if role == Qt.ItemDataRole.ForegroundRole:
@@ -516,7 +523,9 @@ class OperationsModel(QAbstractTableModel):
 
 # =========================================================================== logs
 class LogModel(QAbstractTableModel):
-    COLUMNS = ["Time", "Level", "Source", "Message"]
+    COLUMNS = ["column.time", "column.level", "column.source", "column.message"]
+    LEVELS = {logging.DEBUG: "debug", logging.INFO: "info", logging.WARNING: "warning", logging.ERROR: "error",
+              logging.CRITICAL: "critical"}
     MAX = 5000
 
     def __init__(self, parent=None):
@@ -545,7 +554,7 @@ class LogModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role=DISPLAY):
         if orientation == Qt.Orientation.Horizontal and role == DISPLAY:
-            return self.COLUMNS[section]
+            return t(self.COLUMNS[section])
         return None
 
     def data(self, index, role=DISPLAY):
@@ -553,8 +562,8 @@ class LogModel(QAbstractTableModel):
             return None
         ts, level, source, msg = self._rows[index.row()]
         if role == DISPLAY:
-            return [datetime.fromtimestamp(ts).strftime("%H:%M:%S"), logging.getLevelName(level).title(),
-                    source, msg][index.column()]
+            name = t(f"logs.level.{self.LEVELS[level]}") if level in self.LEVELS else logging.getLevelName(level).title()
+            return [datetime.fromtimestamp(ts).strftime("%H:%M:%S"), name, source, msg][index.column()]
         if role == LevelRole:
             return level
         if role == Qt.ItemDataRole.ForegroundRole:
