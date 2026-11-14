@@ -254,6 +254,30 @@ class BundledTranslationsTests(unittest.TestCase):
         expected |= {f"units.{u}" for u in ("b", "kb", "mb", "gb", "tb")}
         self.assertEqual(sorted(expected - keys), [])
 
+    def test_polish_plural_forms(self):
+        """Every countable text in pl.json uses all Polish forms and picks the right one."""
+        pl = locale_file.load(locale_file.LOCALES_DIR / "pl.json").translations
+        en = locale_file.load(locale_file.LOCALES_DIR / "en.json").translations
+        for key, value in pl.items():
+            if isinstance(en[key], dict):        # plural in English → must be plural in Polish too
+                self.assertIsInstance(value, dict, key)
+            if isinstance(value, dict):
+                self.assertEqual(set(value), {"one", "few", "many", "other"}, key)
+        self.assertEqual([plurals.category("pl", n) for n in (0, 1, 2, 4, 5, 11, 12, 14, 21, 22, 25, 101, 102, 112, 122)],
+                         ["many", "one", "few", "few", "many", "many", "many", "many", "many", "few", "many",
+                          "many", "few", "many", "few"])
+        self.assertEqual(plurals.category("pl", 1.5), "other")
+        i18n.set_language("pl")
+        frames = [t("count.frames", count=n) for n in (1, 2, 5, 12, 22, 25)]
+        self.assertEqual(frames, ["1 klatka", "2 klatki", "5 klatek", "12 klatek", "22 klatki", "25 klatek"])
+        self.assertEqual([t("count.files", count=n) for n in (1, 3, 5, 21, 24)],
+                         ["1 plik", "3 pliki", "5 plików", "21 plików", "24 pliki"])
+        self.assertEqual([t("count.sessions", count=n) for n in (1, 2, 5)], ["1 sesja", "2 sesje", "5 sesji"])
+        self.assertEqual([t("count.errors", count=n) for n in (0, 1, 3, 13)], ["0 błędów", "1 błąd", "3 błędy", "13 błędów"])
+        self.assertEqual([t("count.local", count=n) for n in (1, 2, 7)], ["1 lokalny", "2 lokalne", "7 lokalnych"])
+        self.assertEqual(t("history.downloads.count", count=22, size="1 KB"), "Pobrano 22 pliki · 1 KB")
+        self.assertEqual(t("unrecognized.title", count=5), "5 nierozpoznanych elementów")
+
     def test_statistics_table(self):
         table = stats.table()
         self.assertIn("| English | `en` | 100% ", table)
