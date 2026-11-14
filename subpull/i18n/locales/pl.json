@@ -4,7 +4,7 @@
         "name": "Polski",
         "english_name": "Polish",
         "direction": "ltr",
-        "maintainers": []
+        "maintainers": ["kopersyn"]
     },
     "translations": {
         "format.decimal_separator": ",",

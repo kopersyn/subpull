@@ -143,7 +143,7 @@ fine: anything not translated yet is shown in English.
 | Language | Code | Translated | Status | Maintainers |
 |---|---|---|---|---|
 | English | `en` | 100% (343/343) | Source language | kopersyn |
-| Polski (Polish) | `pl` | 100% (343/343) | Complete |  |
+| Polski (Polish) | `pl` | 100% (343/343) | Complete | kopersyn |
 <!-- translation-status:end -->
 
 The language is chosen in **Settings → Language** (automatic by default) and changes immediately.

@@ -12,7 +12,7 @@ the only place translations live; the application bundles those files and never 
 | Language | Code | Translated | Status | Maintainers |
 |---|---|---|---|---|
 | English | `en` | 100% (343/343) | Source language | kopersyn |
-| Polski (Polish) | `pl` | 100% (343/343) | Complete |  |
+| Polski (Polish) | `pl` | 100% (343/343) | Complete | kopersyn |
 <!-- translation-status:end -->
 
 The numbers are calculated from the files (`python -m subpull.i18n.stats`). Texts that are not
