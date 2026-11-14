@@ -129,7 +129,7 @@ zip and `SHA256SUMS.txt`, published as a GitHub release. Local build:
 ```bash
 pip install pyinstaller
 pyinstaller packaging/subpull.spec --noconfirm --distpath build/dist --workpath build/work
-iscc /DAppVersion=1.0.0 packaging/subpull.iss
+iscc /DAppVersion=1.0.1 packaging/subpull.iss
 ```
 
 The app icon is generated from the logo with `python packaging/make_icon.py`.
