@@ -47,5 +47,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release create "$GITHUB_REF_NAME" build/installer/* \
-            --title "SubPull $VERSION" --notes-file packaging/RELEASE_NOTES.md
+          # A release created in the browser (which also creates the tag) gets the files attached;
+          # a tag pushed with git gets a new release with the notes from packaging/RELEASE_NOTES.md.
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" build/installer/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" build/installer/* \
+              --title "SubPull $VERSION" --notes-file packaging/RELEASE_NOTES.md
+          fi
