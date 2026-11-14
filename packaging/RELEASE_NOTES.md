@@ -1,14 +1,18 @@
-First stable release.
+SubPull 1.0.1 – now in Polish, and ready for your language.
 
-**Download:** `SubPull-1.0.0-Setup.exe` (Windows 10/11, 64-bit, installs per user, no admin rights)
+**Download:** `SubPull-1.0.1-Setup.exe` (Windows 10/11, 64-bit, installs per user, no admin rights)
 or the portable zip. Not code-signed – SmartScreen may ask you to confirm (*More info → Run anyway*).
 Other platforms: `pip install git+https://github.com/kopersyn/subpull` (Python 3.10+).
 
-### Highlights
-- Modern Qt (PySide6) interface: library browser with per-object overview, grouping by object /
-  session / frame type, filters and search, transfer queue, history, activity log and settings.
-- Correct on high-DPI displays (100–200 % scaling) and resizable down to small windows.
-- Reuses a FileZilla Site Manager entry and its trusted host keys; read-only on the server.
-- Multiple directory layouts detected per object; FITS headers read remotely.
-- Parallel downloads with resume and verification; never overwrites local files without
-  explicit confirmation; local download history.
+### New
+- **Interface languages:** English and Polish (*Polski*). Choose in **Settings → Language**; the
+  default *Automatic* follows the system language and falls back to English. The language changes
+  immediately, without a restart.
+- **Community translations:** every language is one JSON file that can be translated directly on
+  GitHub – see [Translate SubPull](https://github.com/kopersyn/subpull/blob/main/translations/README.md).
+  Pull requests are validated automatically; partial translations fall back to English.
+- All translations are bundled with the application; nothing is downloaded.
+
+### Unchanged
+- Read-only on the server, manual-only workflow, downloads only after confirmation, no silent
+  overwrites. Existing settings and download history are kept; `settings.json` gains a `language` key.

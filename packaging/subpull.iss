@@ -1,5 +1,5 @@
 ; Inno Setup script for SubPull (per-user install, no administrator rights needed).
-; Build: iscc /DAppVersion=1.0.0 packaging\subpull.iss   (after the PyInstaller build)
+; Build: iscc /DAppVersion=1.0.1 packaging\subpull.iss   (after the PyInstaller build)
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif

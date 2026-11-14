@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "subpull"
-version = "1.0.0"
+version = "1.0.1"
 description = "Manual, safe downloader for astrophotography frames on SFTP servers, organized per object."
 readme = "README.md"
 license = "MIT"
